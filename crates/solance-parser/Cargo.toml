@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+solance-core = { path = "../solance-core" }
+shakmaty = "0.26"
+pgn-reader = "0.25"

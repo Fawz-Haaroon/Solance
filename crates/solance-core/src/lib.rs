@@ -1,14 +1,23 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use shakmaty::{Chess, Move};
+
+#[derive(Clone)]
+pub struct GameState {
+    pub initial_position: Chess,
+    pub moves: Vec<MoveRecord>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Clone)]
+pub struct MoveRecord {
+    pub move_played: Move,
+    pub fen_before: String,
+    pub fen_after: String,
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl GameState {
+    pub fn new() -> Self {
+        Self {
+            initial_position: Chess::default(),
+            moves: Vec::new(),
+        }
     }
 }
