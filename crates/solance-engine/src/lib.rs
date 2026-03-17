@@ -55,15 +55,14 @@ impl Stockfish {
         self.send(&format!("position fen {fen}"));
         self.send(&format!("go depth {depth}"));
 
-        let mut best_move = String::new();
-        let mut score = None;
-
+        let mut score: Option<i32> = None;
         let mut line = String::new();
 
         loop {
             line.clear();
             self.stdout.read_line(&mut line).unwrap();
 
+            // parse score
             if line.starts_with("info") && line.contains("score cp") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 for i in 0..parts.len() {
@@ -75,12 +74,16 @@ impl Stockfish {
                 }
             }
 
+            // return immediately when bestmove arrives
             if line.starts_with("bestmove") {
-                best_move = line.split_whitespace().nth(1).unwrap().to_string();
-                break;
+                let best_move = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("no bestmove returned")
+                    .to_string();
+
+                return (best_move, score);
             }
         }
-
-        (best_move, score)
     }
 }
