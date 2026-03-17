@@ -1,89 +1,99 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-pub struct Stockfish {
-    _child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+pub struct Engine {
+    _proc: Child,
+    input: ChildStdin,
+    output: BufReader<ChildStdout>,
 }
 
-impl Stockfish {
-    pub fn new() -> Self {
-        let mut child = Command::new("stockfish")
+impl Engine {
+    pub fn spawn() -> Self {
+        let mut proc = Command::new("stockfish")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .expect("failed to start stockfish");
+            .expect("stockfish not found in PATH");
 
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
+        let input = proc.stdin.take().unwrap();
+        let output = proc.stdout.take().unwrap();
 
-        let mut engine = Self {
-            _child: child,
-            stdin,
-            stdout: BufReader::new(stdout),
+        let mut this = Self {
+            _proc: proc,
+            input,
+            output: BufReader::new(output),
         };
 
-        engine.init();
-        engine
+        this.bootstrap();
+        this
     }
 
-    fn init(&mut self) {
-        self.send("uci");
-        self.wait_for("uciok");
+    fn bootstrap(&mut self) {
+        self.cmd("uci");
+        self.wait("uciok");
 
-        self.send("isready");
-        self.wait_for("readyok");
+        self.cmd("isready");
+        self.wait("readyok");
     }
 
-    fn send(&mut self, cmd: &str) {
-        writeln!(self.stdin, "{cmd}").unwrap();
+    fn cmd(&mut self, s: &str) {
+        writeln!(self.input, "{s}").unwrap();
+        self.input.flush().unwrap();
     }
 
-    fn wait_for(&mut self, token: &str) {
-        let mut line = String::new();
+    fn wait(&mut self, needle: &str) {
+        let mut buf = String::new();
+
         loop {
-            line.clear();
-            self.stdout.read_line(&mut line).unwrap();
-            if line.contains(token) {
-                break;
+            buf.clear();
+            self.output.read_line(&mut buf).unwrap();
+
+            if buf.contains(needle) {
+                return;
             }
         }
     }
 
-    pub fn evaluate(&mut self, fen: &str, depth: u32) -> (String, Option<i32>) {
-        self.send(&format!("position fen {fen}"));
-        self.send(&format!("go depth {depth}"));
+    pub fn eval(&mut self, fen: &str, depth: u32) -> (String, Option<i32>) {
+        self.cmd(&format!("position fen {fen}"));
+        self.cmd(&format!("go depth {depth}"));
 
-        let mut score: Option<i32> = None;
+        let mut score = None;
         let mut line = String::new();
 
         loop {
             line.clear();
-            self.stdout.read_line(&mut line).unwrap();
+            self.output.read_line(&mut line).unwrap();
 
-            // parse score
-            if line.starts_with("info") && line.contains("score cp") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                for i in 0..parts.len() {
-                    if parts[i] == "cp" {
-                        if let Ok(v) = parts[i + 1].parse::<i32>() {
-                            score = Some(v);
-                        }
-                    }
+            if line.starts_with("info") {
+                if let Some(s) = parse_score(&line) {
+                    score = Some(s);
                 }
             }
 
-            // return immediately when bestmove arrives
             if line.starts_with("bestmove") {
-                let best_move = line
-                    .split_whitespace()
-                    .nth(1)
-                    .expect("no bestmove returned")
-                    .to_string();
-
-                return (best_move, score);
+                let mv = line.split_whitespace().nth(1).unwrap().to_string();
+                return (mv, score);
             }
         }
     }
+}
+
+fn parse_score(line: &str) -> Option<i32> {
+    let mut it = line.split_whitespace();
+
+    while let Some(tok) = it.next() {
+        match tok {
+            "cp" => {
+                return it.next()?.parse().ok();
+            }
+            "mate" => {
+                let v: i32 = it.next()?.parse().ok()?;
+                return Some(if v > 0 { 10_000 - v } else { -10_000 - v });
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
