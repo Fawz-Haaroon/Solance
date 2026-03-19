@@ -21,8 +21,19 @@ fn main() {
     let mut engine = Engine::spawn();
 
     for (i, m) in game.moves.iter().enumerate() {
-        let (best, eval_before) = engine.eval(&m.fen_before, 12);
-        let (_, eval_after) = engine.eval(&m.fen_after, 12);
+        let (best, eval_before_raw) = engine.eval(&m.fen_before, 12);
+        let (_, eval_after_raw) = engine.eval(&m.fen_after, 12);
+
+        // side to move BEFORE move
+        let before_white =
+            m.fen_before.split_whitespace().nth(1) == Some("w");
+
+        // side to move AFTER move
+        let after_white =
+            m.fen_after.split_whitespace().nth(1) == Some("w");
+
+        let eval_before = eval_before_raw.map(|v| if before_white { v } else { -v });
+        let eval_after = eval_after_raw.map(|v| if after_white { v } else { -v });
 
         let delta = match (eval_before, eval_after) {
             (Some(b), Some(a)) => Some(a - b),
