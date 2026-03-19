@@ -21,7 +21,7 @@ fn main() {
     let mut engine = Engine::spawn();
 
     for (i, m) in game.moves.iter().enumerate() {
-        let (best, score) = engine.eval(&m.fen_after, 12);
+        let (best, score) = engine.eval(&m.fen_before, 12);
 
         println!(
             "{:>3}. {:<8} | eval: {:>6?} | best: {}",
