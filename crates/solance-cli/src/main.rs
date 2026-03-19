@@ -21,13 +21,21 @@ fn main() {
     let mut engine = Engine::spawn();
 
     for (i, m) in game.moves.iter().enumerate() {
-        let (best, score) = engine.eval(&m.fen_before, 12);
+        let (best, eval_before) = engine.eval(&m.fen_before, 12);
+        let (_, eval_after) = engine.eval(&m.fen_after, 12);
+
+        let delta = match (eval_before, eval_after) {
+            (Some(b), Some(a)) => Some(a - b),
+            _ => None,
+        };
 
         println!(
-            "{:>3}. {:<8} | eval: {:>6?} | best: {}",
+            "{:>3}. {:<8} | eval: {:>6?} → {:>6?} | Δ: {:>6?} | best: {}",
             i + 1,
             m.move_played,
-            score,
+            eval_before,
+            eval_after,
+            delta,
             best
         );
     }
