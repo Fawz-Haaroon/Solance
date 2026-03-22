@@ -1,18 +1,14 @@
-use std::{env, fs::File, io::BufReader};
+use std::env;
+use std::fs::File;
+use std::io::BufReader;
 
 use pgn_reader::{BufferedReader, Visitor};
 
-use solance_engine::Stockfish;
+use solance_engine::{Engine, Stockfish};
 use solance_parser::GameBuilder;
 
 fn normalize_move(m: &str) -> String {
-    let s = m.replace('-', "").to_lowercase();
-
-    match s.len() {
-        4 => s,
-        5 => s[1..].into(),
-        _ => s,
-    }
+    m.replace('-', "")
 }
 
 fn main() {
@@ -22,25 +18,28 @@ fn main() {
     let mut reader = BufferedReader::new(BufReader::new(file));
 
     let mut builder = GameBuilder::new();
-    reader.read_all(&mut builder).unwrap();
-
+    reader.read_game(&mut builder).unwrap();
     let game = builder.end_game();
 
-    let mut engine = Stockfish::new();
+    // Engine abstraction (NO concrete coupling)
+    let mut engine: Box<dyn Engine> = Box::new(Stockfish::new());
 
     for (i, m) in game.moves.iter().enumerate() {
+        // Top candidates (for ranking only)
         let candidates = engine.eval_multi(&m.fen_before, 12);
 
         let played = normalize_move(&m.move_played.to_string());
 
         let mut played_rank = None;
         let mut best = String::new();
+        let mut best_score = None;
 
         for c in &candidates {
             let mv = c.mv.trim();
 
             if c.rank == 1 {
                 best = mv.to_string();
+                best_score = c.score;
             }
 
             if played == mv {
@@ -48,19 +47,31 @@ fn main() {
             }
         }
 
-        let class = match played_rank {
-            Some(1) => "best",
-            Some(2) => "excellent",
-            Some(3) => "good",
-            Some(_) => "inaccuracy",
-            None => "mistake",
+        // CRITICAL: evaluate played move independently
+        let played_score = engine.eval_single(&m.fen_after, 12);
+
+        // loss = best - played
+        let loss = match (best_score, played_score) {
+            (Some(b), Some(p)) => Some(b - p),
+            _ => None,
+        };
+
+        let class = match loss {
+            Some(l) if l <= 10   => "best",
+            Some(l) if l <= 30   => "excellent",
+            Some(l) if l <= 80   => "good",
+            Some(l) if l <= 150  => "inaccuracy",
+            Some(l) if l <= 300  => "mistake",
+            Some(_)              => "blunder",
+            None                 => "unknown",
         };
 
         println!(
-            "{:>3}. {:<8} | rank: {:?} | {:<10} | best: {}",
+            "{:>3}. {:<8} | rank: {:?} | loss: {:?} | {:<10} | best: {}",
             i + 1,
             m.move_played,
             played_rank,
+            loss,
             class,
             best
         );
