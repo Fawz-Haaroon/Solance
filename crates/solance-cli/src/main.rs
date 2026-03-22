@@ -9,8 +9,8 @@ fn normalize_move(m: &str) -> String {
     let s = m.replace('-', "").to_lowercase();
 
     match s.len() {
-        4 => s,            // e2e4
-        5 => s[1..].into(), // ng1f3 -> g1f3
+        4 => s,
+        5 => s[1..].into(),
         _ => s,
     }
 }
@@ -29,48 +29,38 @@ fn main() {
     let mut engine = Stockfish::new();
 
     for (i, m) in game.moves.iter().enumerate() {
-        let (best_raw, eval_before_raw) = engine.eval(&m.fen_before, 12);
-        let best = best_raw.trim().to_string();
-
-        let (_, eval_after_raw) = engine.eval(&m.fen_after, 12);
-
-        let before_white =
-            m.fen_before.split_whitespace().nth(1) == Some("w");
-        let after_white =
-            m.fen_after.split_whitespace().nth(1) == Some("w");
-
-        let eval_before: Option<i32> =
-            eval_before_raw.map(|v| if before_white { v } else { -v });
-
-        let eval_after: Option<i32> =
-            eval_after_raw.map(|v| if after_white { v } else { -v });
-
-        let delta = match (eval_before, eval_after) {
-            (Some(b), Some(a)) => Some(a - b),
-            _ => None,
-        };
+        let candidates = engine.eval_multi(&m.fen_before, 12);
 
         let played = normalize_move(&m.move_played.to_string());
 
-        let class = if played == best {
-            "best"
-        } else {
-            match delta {
-                Some(d) if d > -20   => "good",
-                Some(d) if d > -50   => "inaccuracy",
-                Some(d) if d > -100  => "mistake",
-                Some(_)              => "blunder",
-                None                 => "unknown",
+        let mut played_rank = None;
+        let mut best = String::new();
+
+        for c in &candidates {
+            let mv = c.mv.trim();
+
+            if c.rank == 1 {
+                best = mv.to_string();
             }
+
+            if played == mv {
+                played_rank = Some(c.rank);
+            }
+        }
+
+        let class = match played_rank {
+            Some(1) => "best",
+            Some(2) => "excellent",
+            Some(3) => "good",
+            Some(_) => "inaccuracy",
+            None => "mistake",
         };
 
         println!(
-            "{:>3}. {:<8} | eval: {:>6?} → {:>6?} | Δ: {:>5?} | {:<11} | best: {}",
+            "{:>3}. {:<8} | rank: {:?} | {:<10} | best: {}",
             i + 1,
             m.move_played,
-            eval_before,
-            eval_after,
-            delta,
+            played_rank,
             class,
             best
         );
