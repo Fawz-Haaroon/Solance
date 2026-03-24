@@ -8,23 +8,19 @@ pub struct Candidate {
     pub rank: usize,
 }
 
-/*
-    This is the boundary.
-
-    Everything above CLI talks to THIS, not Stockfish.
-*/
 pub trait Engine {
-    fn eval_multi(&mut self, fen: &str, depth: u32) -> Vec<Candidate>;
-    fn eval_single(&mut self, fen: &str, depth: u32) -> Option<i32>;
+    fn start_game(&mut self);
+    fn apply_move(&mut self, mv: &str);
+    fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate>;
+    fn eval_current_single(&mut self, depth: u32) -> Option<i32>;
 }
 
-/*
-    Concrete implementation: Stockfish (UCI)
-*/
 pub struct Stockfish {
     _child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+
+    moves: Vec<String>,
 }
 
 impl Stockfish {
@@ -42,6 +38,7 @@ impl Stockfish {
             _child: child,
             stdin,
             stdout: BufReader::new(stdout),
+            moves: Vec::new(),
         };
 
         s.init();
@@ -72,14 +69,34 @@ impl Stockfish {
             }
         }
     }
+
+    fn sync_position(&mut self) {
+        let mut cmd = String::from("position startpos");
+
+        if !self.moves.is_empty() {
+            cmd.push_str(" moves ");
+            cmd.push_str(&self.moves.join(" "));
+        }
+
+        self.send(&cmd);
+    }
 }
 
-/*
-    Engine trait implementation (THIS is what CLI uses)
-*/
 impl Engine for Stockfish {
-    fn eval_multi(&mut self, fen: &str, depth: u32) -> Vec<Candidate> {
-        self.send(&format!("position fen {fen}"));
+    fn start_game(&mut self) {
+        self.moves.clear();
+        self.send("ucinewgame");
+        self.send("isready");
+        self.wait_for("readyok");
+    }
+
+    fn apply_move(&mut self, mv: &str) {
+        self.moves.push(mv.to_string());
+    }
+
+    fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
+        self.sync_position();
+
         self.send("setoption name MultiPV value 5");
         self.send(&format!("go depth {depth}"));
 
@@ -99,15 +116,9 @@ impl Engine for Stockfish {
 
                 for i in 0..parts.len() {
                     match parts[i] {
-                        "multipv" => {
-                            rank = parts.get(i + 1).and_then(|v| v.parse::<usize>().ok());
-                        }
-                        "cp" => {
-                            score = parts.get(i + 1).and_then(|v| v.parse::<i32>().ok());
-                        }
-                        "pv" => {
-                            mv = parts.get(i + 1).map(|v| v.to_string());
-                        }
+                        "multipv" => rank = parts.get(i + 1).and_then(|v| v.parse().ok()),
+                        "cp" => score = parts.get(i + 1).and_then(|v| v.parse().ok()),
+                        "pv" => mv = parts.get(i + 1).map(|v| v.to_string()),
                         _ => {}
                     }
                 }
@@ -132,8 +143,8 @@ impl Engine for Stockfish {
         out
     }
 
-    fn eval_single(&mut self, fen: &str, depth: u32) -> Option<i32> {
-        self.send(&format!("position fen {fen}"));
+    fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
+        self.sync_position();
         self.send(&format!("go depth {depth}"));
 
         let mut line = String::new();

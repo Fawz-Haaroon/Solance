@@ -21,14 +21,16 @@ fn main() {
     reader.read_game(&mut builder).unwrap();
     let game = builder.end_game();
 
-    // Engine abstraction (NO concrete coupling)
     let mut engine: Box<dyn Engine> = Box::new(Stockfish::new());
 
-    for (i, m) in game.moves.iter().enumerate() {
-        // Top candidates (for ranking only)
-        let candidates = engine.eval_multi(&m.fen_before, 12);
+    // NEW: initialize engine state
+    engine.start_game();
 
+    for (i, m) in game.moves.iter().enumerate() {
         let played = normalize_move(&m.move_played.to_string());
+
+        // BEFORE applying move → evaluate position
+        let candidates = engine.eval_current_multi(12);
 
         let mut played_rank = None;
         let mut best = String::new();
@@ -47,10 +49,12 @@ fn main() {
             }
         }
 
-        // CRITICAL: evaluate played move independently
-        let played_score = engine.eval_single(&m.fen_after, 12);
+        // APPLY MOVE (state mutation)
+        engine.apply_move(&played);
 
-        // loss = best - played
+        // AFTER move → evaluate new position
+        let played_score = engine.eval_current_single(12);
+
         let loss = match (best_score, played_score) {
             (Some(b), Some(p)) => Some(b - p),
             _ => None,
