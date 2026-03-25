@@ -1,10 +1,6 @@
 use pgn_reader::{SanPlus, Visitor};
-use shakmaty::{
-    fen::Fen,
-    EnPassantMode,
-    Chess,
-    Position,
-};
+use shakmaty::{Chess, Position, Move};
+use shakmaty::fen::Fen;
 
 use solance_core::{GameState, MoveRecord};
 
@@ -26,24 +22,33 @@ impl Visitor for GameBuilder {
     type Result = GameState;
 
     fn san(&mut self, san_plus: SanPlus) {
-        let mv = san_plus.san.to_move(&self.state).unwrap();
+        let mv: Move = san_plus.san.to_move(&self.state).unwrap();
 
-        let fen_before =
-            Fen::from_position(self.state.clone(), EnPassantMode::Legal).to_string();
+        let fen_before = Fen::from_position(
+            self.state.clone(),
+            shakmaty::EnPassantMode::Legal
+        ).to_string();
+
+        let uci = mv.to_string(); // THIS is already UCI (important)
 
         self.state.play_unchecked(&mv);
 
-        let fen_after =
-            Fen::from_position(self.state.clone(), EnPassantMode::Legal).to_string();
+        let fen_after = Fen::from_position(
+            self.state.clone(),
+            shakmaty::EnPassantMode::Legal
+        ).to_string();
 
         self.game.moves.push(MoveRecord {
-            move_played: mv,
+            mv,
+            uci,
             fen_before,
             fen_after,
         });
     }
 
     fn end_game(&mut self) -> GameState {
-        self.game.clone()
+        GameState {
+            moves: self.game.moves.clone(),
+        }
     }
 }
