@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "crates/solance-core",
+    "crates/solance-parser",
+    "crates/solance-engine",
+    "crates/solance-analysis",
+    "crates/solance-render",
+    "crates/solance-cli"
+]
