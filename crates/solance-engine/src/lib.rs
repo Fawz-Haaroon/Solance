@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
@@ -6,6 +7,12 @@ pub struct Candidate {
     pub mv: String,
     pub score: Option<i32>,
     pub rank: usize,
+}
+
+#[derive(Clone)]
+struct EvalCache {
+    multi: Vec<Candidate>,
+    single: Option<i32>,
 }
 
 pub trait Engine {
@@ -21,6 +28,9 @@ pub struct Stockfish {
     stdout: BufReader<ChildStdout>,
 
     moves: Vec<String>,
+
+    // NEW: cache
+    cache: HashMap<String, EvalCache>,
 }
 
 impl Stockfish {
@@ -39,6 +49,7 @@ impl Stockfish {
             stdin,
             stdout: BufReader::new(stdout),
             moves: Vec::new(),
+            cache: HashMap::new(),
         };
 
         s.init();
@@ -70,6 +81,10 @@ impl Stockfish {
         }
     }
 
+    fn current_key(&self) -> String {
+        self.moves.join(" ")
+    }
+
     fn sync_position(&mut self) {
         let mut cmd = String::from("position startpos");
 
@@ -80,21 +95,8 @@ impl Stockfish {
 
         self.send(&cmd);
     }
-}
 
-impl Engine for Stockfish {
-    fn start_game(&mut self) {
-        self.moves.clear();
-        self.send("ucinewgame");
-        self.send("isready");
-        self.wait_for("readyok");
-    }
-
-    fn apply_move(&mut self, mv: &str) {
-        self.moves.push(mv.to_string());
-    }
-
-    fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
+    fn compute_multi(&mut self, depth: u32) -> Vec<Candidate> {
         self.sync_position();
 
         self.send("setoption name MultiPV value 5");
@@ -143,7 +145,7 @@ impl Engine for Stockfish {
         out
     }
 
-    fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
+    fn compute_single(&mut self, depth: u32) -> Option<i32> {
         self.sync_position();
         self.send(&format!("go depth {depth}"));
 
@@ -170,5 +172,61 @@ impl Engine for Stockfish {
                 return score;
             }
         }
+    }
+}
+
+impl Engine for Stockfish {
+    fn start_game(&mut self) {
+        self.moves.clear();
+        self.cache.clear(); // reset cache per game
+
+        self.send("ucinewgame");
+        self.send("isready");
+        self.wait_for("readyok");
+    }
+
+    fn apply_move(&mut self, mv: &str) {
+        self.moves.push(mv.to_string());
+    }
+
+    fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
+        let key = self.current_key();
+
+        if let Some(cached) = self.cache.get(&key) {
+            return cached.multi.clone();
+        }
+
+        let multi = self.compute_multi(depth);
+        let single = multi.get(0).and_then(|c| c.score);
+
+        self.cache.insert(
+            key,
+            EvalCache {
+                multi: multi.clone(),
+                single,
+            },
+        );
+
+        multi
+    }
+
+    fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
+        let key = self.current_key();
+
+        if let Some(cached) = self.cache.get(&key) {
+            return cached.single;
+        }
+
+        let single = self.compute_single(depth);
+
+        self.cache.insert(
+            key,
+            EvalCache {
+                multi: Vec::new(),
+                single,
+            },
+        );
+
+        single
     }
 }
