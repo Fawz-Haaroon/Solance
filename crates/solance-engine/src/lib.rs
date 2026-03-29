@@ -28,8 +28,6 @@ pub struct Stockfish {
     stdout: BufReader<ChildStdout>,
 
     moves: Vec<String>,
-
-    // NEW: cache
     cache: HashMap<String, EvalCache>,
 }
 
@@ -103,7 +101,7 @@ impl Stockfish {
         self.send(&format!("go depth {depth}"));
 
         let mut line = String::new();
-        let mut out = Vec::new();
+        let mut out: Vec<Candidate> = Vec::new(); // ← FIXED TYPE
 
         loop {
             line.clear();
@@ -118,9 +116,15 @@ impl Stockfish {
 
                 for i in 0..parts.len() {
                     match parts[i] {
-                        "multipv" => rank = parts.get(i + 1).and_then(|v| v.parse().ok()),
-                        "cp" => score = parts.get(i + 1).and_then(|v| v.parse().ok()),
-                        "pv" => mv = parts.get(i + 1).map(|v| v.to_string()),
+                        "multipv" => {
+                            rank = parts.get(i + 1).and_then(|v| v.parse::<usize>().ok())
+                        }
+                        "cp" => {
+                            score = parts.get(i + 1).and_then(|v| v.parse::<i32>().ok())
+                        }
+                        "pv" => {
+                            mv = parts.get(i + 1).map(|v| v.to_string())
+                        }
                         _ => {}
                     }
                 }
@@ -178,7 +182,7 @@ impl Stockfish {
 impl Engine for Stockfish {
     fn start_game(&mut self) {
         self.moves.clear();
-        self.cache.clear(); // reset cache per game
+        self.cache.clear();
 
         self.send("ucinewgame");
         self.send("isready");
