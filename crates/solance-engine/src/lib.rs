@@ -5,7 +5,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 #[derive(Debug, Clone)]
 pub struct Candidate {
     pub mv: String,
-    pub score: Option<i32>,
+    pub score: Option<i32>, // ALWAYS white-centric now
     pub rank: usize,
 }
 
@@ -29,6 +29,8 @@ pub struct Stockfish {
 
     moves: Vec<String>,
     cache: HashMap<String, EvalCache>,
+
+    white_to_move: bool, // ← NEW
 }
 
 impl Stockfish {
@@ -48,6 +50,7 @@ impl Stockfish {
             stdout: BufReader::new(stdout),
             moves: Vec::new(),
             cache: HashMap::new(),
+            white_to_move: true,
         };
 
         s.init();
@@ -94,6 +97,14 @@ impl Stockfish {
         self.send(&cmd);
     }
 
+    fn normalize(&self, v: i32) -> i32 {
+        if self.white_to_move {
+            v
+        } else {
+            -v
+        }
+    }
+
     fn compute_multi(&mut self, depth: u32) -> Vec<Candidate> {
         self.sync_position();
 
@@ -101,7 +112,7 @@ impl Stockfish {
         self.send(&format!("go depth {depth}"));
 
         let mut line = String::new();
-        let mut out: Vec<Candidate> = Vec::new(); // ← FIXED TYPE
+        let mut out: Vec<Candidate> = Vec::new();
 
         loop {
             line.clear();
@@ -133,7 +144,7 @@ impl Stockfish {
                     if !out.iter().any(|c| c.rank == rank) {
                         out.push(Candidate {
                             mv,
-                            score: Some(score),
+                            score: Some(self.normalize(score)),
                             rank,
                         });
                     }
@@ -166,7 +177,7 @@ impl Stockfish {
                 for i in 0..parts.len() {
                     if parts[i] == "cp" {
                         if let Ok(v) = parts[i + 1].parse::<i32>() {
-                            score = Some(v);
+                            score = Some(self.normalize(v));
                         }
                     }
                 }
@@ -183,6 +194,7 @@ impl Engine for Stockfish {
     fn start_game(&mut self) {
         self.moves.clear();
         self.cache.clear();
+        self.white_to_move = true;
 
         self.send("ucinewgame");
         self.send("isready");
@@ -191,6 +203,7 @@ impl Engine for Stockfish {
 
     fn apply_move(&mut self, mv: &str) {
         self.moves.push(mv.to_string());
+        self.white_to_move = !self.white_to_move; // ← CRITICAL
     }
 
     fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
