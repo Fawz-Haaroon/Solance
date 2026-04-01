@@ -6,6 +6,7 @@ use pgn_reader::{BufferedReader, Visitor};
 
 use solance_engine::{Engine, Stockfish};
 use solance_parser::GameBuilder;
+use solance_analysis::{analyze, Classification};
 
 fn main() {
     let path = env::args().nth(1).expect("missing pgn file");
@@ -26,50 +27,30 @@ fn main() {
 
         let candidates = engine.eval_current_multi(12);
 
-        let mut played_rank = None;
-        let mut best = String::new();
-        let mut best_score = None;
-
-        for c in &candidates {
-            let mv = c.mv.trim();
-
-            if c.rank == 1 {
-                best = mv.to_string();
-                best_score = c.score;
-            }
-
-            if played == mv {
-                played_rank = Some(c.rank);
-            }
-        }
-
         engine.apply_move(played);
 
         let played_score = engine.eval_current_single(12);
 
-        let loss = match (best_score, played_score) {
-            (Some(b), Some(p)) => Some(b - p),
-            _ => None,
-        };
+        let analysis = analyze(played, &candidates, played_score);
 
-        let class = match loss {
-            Some(l) if l <= 10   => "best",
-            Some(l) if l <= 30   => "excellent",
-            Some(l) if l <= 80   => "good",
-            Some(l) if l <= 150  => "inaccuracy",
-            Some(l) if l <= 300  => "mistake",
-            Some(_)              => "blunder",
-            None                 => "unknown",
+        let class_str = match analysis.class {
+            Classification::Best => "best",
+            Classification::Excellent => "excellent",
+            Classification::Good => "good",
+            Classification::Inaccuracy => "inaccuracy",
+            Classification::Mistake => "mistake",
+            Classification::Blunder => "blunder",
+            Classification::Unknown => "unknown",
         };
 
         println!(
             "{:>3}. {:<8} | rank: {:?} | loss: {:?} | {:<10} | best: {}",
             i + 1,
             m.mv,
-            played_rank,
-            loss,
-            class,
-            best
+            analysis.rank,
+            analysis.loss,
+            class_str,
+            analysis.best.mv
         );
     }
 }
