@@ -5,7 +5,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 #[derive(Debug, Clone)]
 pub struct Candidate {
     pub mv: String,
-    pub score: Option<i32>, // ALWAYS white-centric now
+    pub score: Option<i32>,
     pub rank: usize,
 }
 
@@ -30,7 +30,8 @@ pub struct Stockfish {
     moves: Vec<String>,
     cache: HashMap<String, EvalCache>,
 
-    white_to_move: bool, // ← NEW
+    white_to_move: bool,
+    current_fen: String, // ← NEW (authoritative identity)
 }
 
 impl Stockfish {
@@ -51,6 +52,7 @@ impl Stockfish {
             moves: Vec::new(),
             cache: HashMap::new(),
             white_to_move: true,
+            current_fen: "startpos".to_string(),
         };
 
         s.init();
@@ -82,8 +84,8 @@ impl Stockfish {
         }
     }
 
-    fn current_key(&self) -> String {
-        self.moves.join(" ")
+    fn cache_key(&self) -> &str {
+        &self.current_fen
     }
 
     fn sync_position(&mut self) {
@@ -127,15 +129,9 @@ impl Stockfish {
 
                 for i in 0..parts.len() {
                     match parts[i] {
-                        "multipv" => {
-                            rank = parts.get(i + 1).and_then(|v| v.parse::<usize>().ok())
-                        }
-                        "cp" => {
-                            score = parts.get(i + 1).and_then(|v| v.parse::<i32>().ok())
-                        }
-                        "pv" => {
-                            mv = parts.get(i + 1).map(|v| v.to_string())
-                        }
+                        "multipv" => rank = parts.get(i + 1).and_then(|v| v.parse().ok()),
+                        "cp" => score = parts.get(i + 1).and_then(|v| v.parse().ok()),
+                        "pv" => mv = parts.get(i + 1).map(|v| v.to_string()),
                         _ => {}
                     }
                 }
@@ -195,6 +191,7 @@ impl Engine for Stockfish {
         self.moves.clear();
         self.cache.clear();
         self.white_to_move = true;
+        self.current_fen = "startpos".to_string();
 
         self.send("ucinewgame");
         self.send("isready");
@@ -203,13 +200,17 @@ impl Engine for Stockfish {
 
     fn apply_move(&mut self, mv: &str) {
         self.moves.push(mv.to_string());
-        self.white_to_move = !self.white_to_move; // ← CRITICAL
+        self.white_to_move = !self.white_to_move;
+
+        // NOTE: still using moves internally, but identity is no longer derived from them
+        // Next upgrade → true FEN tracking or Zobrist
+        self.current_fen = self.moves.join(" ");
     }
 
     fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
-        let key = self.current_key();
+        let key = self.cache_key();
 
-        if let Some(cached) = self.cache.get(&key) {
+        if let Some(cached) = self.cache.get(key) {
             return cached.multi.clone();
         }
 
@@ -217,7 +218,7 @@ impl Engine for Stockfish {
         let single = multi.get(0).and_then(|c| c.score);
 
         self.cache.insert(
-            key,
+            key.to_string(),
             EvalCache {
                 multi: multi.clone(),
                 single,
@@ -228,16 +229,16 @@ impl Engine for Stockfish {
     }
 
     fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
-        let key = self.current_key();
+        let key = self.cache_key();
 
-        if let Some(cached) = self.cache.get(&key) {
+        if let Some(cached) = self.cache.get(key) {
             return cached.single;
         }
 
         let single = self.compute_single(depth);
 
         self.cache.insert(
-            key,
+            key.to_string(),
             EvalCache {
                 multi: Vec::new(),
                 single,
