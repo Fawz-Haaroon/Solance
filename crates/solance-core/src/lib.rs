@@ -1,19 +1,7 @@
-use shakmaty::Move;
+pub mod zobrist;
 
-#[derive(Clone)]
-pub struct MoveRecord {
-    pub mv: Move,
-    pub uci: String,
-    pub fen_before: String,
-    pub fen_after: String,
-}
+mod game;
+mod move_record;
 
-pub struct GameState {
-    pub moves: Vec<MoveRecord>,
-}
-
-impl GameState {
-    pub fn new() -> Self {
-        Self { moves: Vec::new() }
-    }
-}
+pub use game::GameState;
+pub use move_record::MoveRecord;

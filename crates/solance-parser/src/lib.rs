@@ -39,11 +39,12 @@ impl Visitor for GameBuilder {
         ).to_string();
 
         self.game.moves.push(MoveRecord {
-            mv,
+            mv: mv.to_string(),
             uci,
             fen_before,
             fen_after,
         });
+
     }
 
     fn end_game(&mut self) -> GameState {
