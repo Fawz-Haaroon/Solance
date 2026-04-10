@@ -31,7 +31,7 @@ pub struct Stockfish {
     cache: HashMap<String, EvalCache>,
 
     white_to_move: bool,
-    current_fen: String, // ← NEW (authoritative identity)
+    current_fen: String,
 }
 
 impl Stockfish {
@@ -84,8 +84,8 @@ impl Stockfish {
         }
     }
 
-    fn cache_key(&self) -> &str {
-        &self.current_fen
+    fn cache_key(&self) -> String {
+        self.current_fen.clone()
     }
 
     fn sync_position(&mut self) {
@@ -202,15 +202,13 @@ impl Engine for Stockfish {
         self.moves.push(mv.to_string());
         self.white_to_move = !self.white_to_move;
 
-        // NOTE: still using moves internally, but identity is no longer derived from them
-        // Next upgrade → true FEN tracking or Zobrist
         self.current_fen = self.moves.join(" ");
     }
 
     fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
         let key = self.cache_key();
 
-        if let Some(cached) = self.cache.get(key) {
+        if let Some(cached) = self.cache.get(&key) {
             return cached.multi.clone();
         }
 
@@ -218,7 +216,7 @@ impl Engine for Stockfish {
         let single = multi.get(0).and_then(|c| c.score);
 
         self.cache.insert(
-            key.to_string(),
+            key,
             EvalCache {
                 multi: multi.clone(),
                 single,
@@ -231,14 +229,14 @@ impl Engine for Stockfish {
     fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
         let key = self.cache_key();
 
-        if let Some(cached) = self.cache.get(key) {
+        if let Some(cached) = self.cache.get(&key) {
             return cached.single;
         }
 
         let single = self.compute_single(depth);
 
         self.cache.insert(
-            key.to_string(),
+            key,
             EvalCache {
                 multi: Vec::new(),
                 single,
