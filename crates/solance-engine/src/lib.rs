@@ -2,6 +2,11 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
+use shakmaty::{Chess, Position};
+use shakmaty::uci::Uci;
+
+use solance_core::zobrist::{hash_board, ZobristKey};
+
 #[derive(Debug, Clone)]
 pub struct Candidate {
     pub mv: String,
@@ -28,10 +33,10 @@ pub struct Stockfish {
     stdout: BufReader<ChildStdout>,
 
     moves: Vec<String>,
-    cache: HashMap<String, EvalCache>,
+    cache: HashMap<ZobristKey, EvalCache>,
 
     white_to_move: bool,
-    current_fen: String,
+    current_key: ZobristKey,
 }
 
 impl Stockfish {
@@ -52,7 +57,7 @@ impl Stockfish {
             moves: Vec::new(),
             cache: HashMap::new(),
             white_to_move: true,
-            current_fen: "startpos".to_string(),
+            current_key: 0,
         };
 
         s.init();
@@ -84,10 +89,6 @@ impl Stockfish {
         }
     }
 
-    fn cache_key(&self) -> String {
-        self.current_fen.clone()
-    }
-
     fn sync_position(&mut self) {
         let mut cmd = String::from("position startpos");
 
@@ -100,11 +101,19 @@ impl Stockfish {
     }
 
     fn normalize(&self, v: i32) -> i32 {
-        if self.white_to_move {
-            v
-        } else {
-            -v
+        if self.white_to_move { v } else { -v }
+    }
+
+    fn rebuild_position(&self) -> Chess {
+        let mut pos = Chess::default();
+
+        for m in &self.moves {
+            let uci: Uci = m.parse().unwrap();
+            let mv = uci.to_move(&pos).unwrap();
+            pos = pos.play(&mv).unwrap();
         }
+
+        pos
     }
 
     fn compute_multi(&mut self, depth: u32) -> Vec<Candidate> {
@@ -191,7 +200,7 @@ impl Engine for Stockfish {
         self.moves.clear();
         self.cache.clear();
         self.white_to_move = true;
-        self.current_fen = "startpos".to_string();
+        self.current_key = 0;
 
         self.send("ucinewgame");
         self.send("isready");
@@ -202,11 +211,12 @@ impl Engine for Stockfish {
         self.moves.push(mv.to_string());
         self.white_to_move = !self.white_to_move;
 
-        self.current_fen = self.moves.join(" ");
+        let pos = self.rebuild_position();
+        self.current_key = hash_board(pos.board(), pos.turn());
     }
 
     fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
-        let key = self.cache_key();
+        let key = self.current_key;
 
         if let Some(cached) = self.cache.get(&key) {
             return cached.multi.clone();
@@ -227,7 +237,7 @@ impl Engine for Stockfish {
     }
 
     fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
-        let key = self.cache_key();
+        let key = self.current_key;
 
         if let Some(cached) = self.cache.get(&key) {
             return cached.single;
