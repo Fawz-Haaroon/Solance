@@ -164,35 +164,6 @@ impl Stockfish {
         out.sort_by_key(|c| c.rank);
         out
     }
-
-    fn compute_single(&mut self, depth: u32) -> Option<i32> {
-        self.sync_position();
-        self.send(&format!("go depth {depth}"));
-
-        let mut line = String::new();
-        let mut score = None;
-
-        loop {
-            line.clear();
-            self.stdout.read_line(&mut line).unwrap();
-
-            if line.starts_with("info") && line.contains("score cp") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-
-                for i in 0..parts.len() {
-                    if parts[i] == "cp" {
-                        if let Ok(v) = parts[i + 1].parse::<i32>() {
-                            score = Some(self.normalize(v));
-                        }
-                    }
-                }
-            }
-
-            if line.starts_with("bestmove") {
-                return score;
-            }
-        }
-    }
 }
 
 impl Engine for Stockfish {
@@ -243,12 +214,14 @@ impl Engine for Stockfish {
             return cached.single;
         }
 
-        let single = self.compute_single(depth);
+        // derive from multi instead of calling engine again
+        let multi = self.compute_multi(depth);
+        let single = multi.get(0).and_then(|c| c.score);
 
         self.cache.insert(
             key,
             EvalCache {
-                multi: Vec::new(),
+                multi,
                 single,
             },
         );
