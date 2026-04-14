@@ -6,7 +6,6 @@ use pgn_reader::{BufferedReader, Visitor};
 
 use solance_engine::{Engine, Stockfish};
 use solance_parser::GameBuilder;
-use solance_analysis::{analyze, Classification};
 
 fn main() {
     let path = env::args().nth(1).expect("missing pgn file");
@@ -19,38 +18,49 @@ fn main() {
     let game = builder.end_game();
 
     let mut engine: Box<dyn Engine> = Box::new(Stockfish::new());
-
     engine.start_game();
 
     for (i, m) in game.moves.iter().enumerate() {
-        let played = &m.uci;
+        // ---- BEFORE MOVE ----
+        let eval_before = engine.evaluate(12);
 
-        let candidates = engine.eval_current_multi(12);
+        // apply move using UCI (engine correctness)
+        engine.apply_move(&m.uci);
 
-        engine.apply_move(played);
+        // ---- AFTER MOVE ----
+        let eval_after = engine.evaluate(12);
 
-        let played_score = engine.eval_current_single(12);
+        // best move from BEFORE position
+        let best_move = eval_before.best.clone().unwrap_or_default();
 
-        let analysis = analyze(played, &candidates, played_score);
+        // scores
+        let best_score = eval_before.score;
+        let played_score = eval_after.score;
 
-        let class_str = match analysis.class {
-            Classification::Best => "best",
-            Classification::Excellent => "excellent",
-            Classification::Good => "good",
-            Classification::Inaccuracy => "inaccuracy",
-            Classification::Mistake => "mistake",
-            Classification::Blunder => "blunder",
-            Classification::Unknown => "unknown",
+        // centipawn loss
+        let loss = match (best_score, played_score) {
+            (Some(b), Some(p)) => Some(b - p),
+            _ => None,
+        };
+
+        // classification
+        let class = match loss {
+            Some(l) if l <= 10   => "best",
+            Some(l) if l <= 30   => "excellent",
+            Some(l) if l <= 80   => "good",
+            Some(l) if l <= 150  => "inaccuracy",
+            Some(l) if l <= 300  => "mistake",
+            Some(_)              => "blunder",
+            None                 => "unknown",
         };
 
         println!(
-            "{:>3}. {:<8} | rank: {:?} | loss: {:?} | {:<10} | best: {}",
+            "{:>3}. {:<8} | loss: {:?} | {:<10} | best: {}",
             i + 1,
-            m.mv,
-            analysis.rank,
-            analysis.loss,
-            class_str,
-            analysis.best.mv
+            m.mv,        // human-readable move
+            loss,
+            class,
+            best_move
         );
     }
 }

@@ -3,7 +3,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use shakmaty::{Chess, Position};
-use shakmaty::uci::Uci;
 use shakmaty::fen::Fen;
 use shakmaty::EnPassantMode;
 
@@ -16,17 +15,22 @@ pub struct Candidate {
     pub rank: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct Evaluation {
+    pub best: Option<String>,
+    pub score: Option<i32>,
+    pub candidates: Vec<Candidate>,
+}
+
 #[derive(Clone)]
 struct EvalCache {
-    multi: Vec<Candidate>,
-    single: Option<i32>,
+    eval: Evaluation,
 }
 
 pub trait Engine {
     fn start_game(&mut self);
     fn apply_move(&mut self, mv: &str);
-    fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate>;
-    fn eval_current_single(&mut self, depth: u32) -> Option<i32>;
+    fn evaluate(&mut self, depth: u32) -> Evaluation;
 }
 
 pub struct Stockfish {
@@ -81,11 +85,9 @@ impl Stockfish {
 
     fn wait_for(&mut self, token: &str) {
         let mut line = String::new();
-
         loop {
             line.clear();
             self.stdout.read_line(&mut line).unwrap();
-
             if line.contains(token) {
                 break;
             }
@@ -101,7 +103,7 @@ impl Stockfish {
         if self.position.turn().is_white() { v } else { -v }
     }
 
-    fn compute_multi(&mut self, depth: u32) -> Vec<Candidate> {
+    fn compute(&mut self, depth: u32) -> Evaluation {
         self.sync_position();
 
         self.send("setoption name MultiPV value 5");
@@ -147,14 +149,17 @@ impl Stockfish {
         }
 
         out.sort_by_key(|c| c.rank);
-        out
+
+        let best = out.get(0).map(|c| c.mv.clone());
+        let score = out.get(0).and_then(|c| c.score);
+
+        Evaluation { best, score, candidates: out }
     }
 }
 
 impl Engine for Stockfish {
     fn start_game(&mut self) {
         self.cache.clear();
-
         self.position = Chess::default();
         self.current_key = hash_board(self.position.board(), self.position.turn());
 
@@ -163,53 +168,51 @@ impl Engine for Stockfish {
         self.wait_for("readyok");
     }
 
-    fn apply_move(&mut self, mv: &str) {
-        let uci: Uci = mv.parse().unwrap();
+fn apply_move(&mut self, mv: &str) {
+    // ---- FAST PATH (strict UCI) ----
+    let cleaned = mv.replace("-", "");
+
+    if let Ok(uci) = cleaned.parse::<shakmaty::uci::Uci>() {
         let m = uci.to_move(&self.position).unwrap();
 
         self.position = self.position.clone().play(&m).unwrap();
         self.current_key = hash_board(self.position.board(), self.position.turn());
+        return;
     }
 
-    fn eval_current_multi(&mut self, depth: u32) -> Vec<Candidate> {
+    // ---- FALLBACK (resolve from board state) ----
+    let stripped: String = mv
+        .chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        .collect();
+
+    let found = self.position.legal_moves().into_iter().find(|m| {
+        let from = m.from().unwrap().to_string();
+        let to = m.to().to_string();
+        let coord = format!("{}{}", from, to);
+        coord == stripped
+    });
+
+    let m = match found {
+        Some(m) => m,
+        None => panic!("unresolvable move: {}", mv),
+    };
+
+    self.position = self.position.clone().play(&m).unwrap();
+    self.current_key = hash_board(self.position.board(), self.position.turn());
+}
+
+    fn evaluate(&mut self, depth: u32) -> Evaluation {
         let key = self.current_key;
 
         if let Some(cached) = self.cache.get(&key) {
-            return cached.multi.clone();
+            return cached.eval.clone();
         }
 
-        let multi = self.compute_multi(depth);
-        let single = multi.get(0).and_then(|c| c.score);
+        let eval = self.compute(depth);
 
-        self.cache.insert(
-            key,
-            EvalCache {
-                multi: multi.clone(),
-                single,
-            },
-        );
+        self.cache.insert(key, EvalCache { eval: eval.clone() });
 
-        multi
-    }
-
-    fn eval_current_single(&mut self, depth: u32) -> Option<i32> {
-        let key = self.current_key;
-
-        if let Some(cached) = self.cache.get(&key) {
-            return cached.single;
-        }
-
-        let multi = self.compute_multi(depth);
-        let single = multi.get(0).and_then(|c| c.score);
-
-        self.cache.insert(
-            key,
-            EvalCache {
-                multi,
-                single,
-            },
-        );
-
-        single
+        eval
     }
 }
