@@ -21,31 +21,14 @@ fn main() {
     engine.start_game();
 
     for (i, m) in game.moves.iter().enumerate() {
-        // ---- BEFORE POSITION ----
         let eval_before = engine.evaluate(12);
 
-        // best from BEFORE
         let best_move = eval_before.best.clone().unwrap_or_default();
         let best_score = eval_before.score;
 
-        // evaluate PLAYED MOVE from SAME position:
-        // apply → eval → revert by reinitializing and replaying moves up to i, excluding current
-        // (cheap enough for now; we’ll optimize later)
+        let played_score = engine.evaluate_after_move(&m.uci, 12);
 
-        // snapshot: rebuild engine to the same pre-move state
-        let mut probe: Box<dyn Engine> = Box::new(Stockfish::new());
-        probe.start_game();
-        for j in 0..i {
-            probe.apply_move(&game.moves[j].uci);
-        }
-
-        // apply current move on probe and evaluate
-        probe.apply_move(&m.uci);
-        let played_after = probe.evaluate(12).score;
-
-        // convert played_after (after move) to comparable delta:
-        // loss = best_before - played_after (but now both from SAME ROOT via probe)
-        let loss = match (best_score, played_after) {
+        let loss = match (best_score, played_score) {
             (Some(b), Some(p)) => Some(b - p),
             _ => None,
         };
@@ -60,7 +43,6 @@ fn main() {
             None                 => "unknown",
         };
 
-        // advance main engine AFTER computing loss
         engine.apply_move(&m.uci);
 
         println!(

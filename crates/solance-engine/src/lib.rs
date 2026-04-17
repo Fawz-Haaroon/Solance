@@ -31,6 +31,7 @@ pub trait Engine {
     fn start_game(&mut self);
     fn apply_move(&mut self, mv: &str);
     fn evaluate(&mut self, depth: u32) -> Evaluation;
+    fn evaluate_after_move(&mut self, mv: &str, depth: u32) -> Option<i32>;
 }
 
 pub struct Stockfish {
@@ -155,6 +156,18 @@ impl Stockfish {
 
         Evaluation { best, score, candidates: out }
     }
+
+    fn evaluate_after_move_internal(&mut self, mv: &str, depth: u32) -> Option<i32> {
+        let original = self.position.clone();
+
+        self.apply_move(mv);
+        let score = self.evaluate(depth).score;
+
+        self.position = original;
+        self.current_key = hash_board(self.position.board(), self.position.turn());
+
+        score
+    }
 }
 
 impl Engine for Stockfish {
@@ -168,39 +181,35 @@ impl Engine for Stockfish {
         self.wait_for("readyok");
     }
 
-fn apply_move(&mut self, mv: &str) {
-    // ---- FAST PATH (strict UCI) ----
-    let cleaned = mv.replace("-", "");
+    fn apply_move(&mut self, mv: &str) {
+        let cleaned = mv.replace("-", "");
 
-    if let Ok(uci) = cleaned.parse::<shakmaty::uci::Uci>() {
-        let m = uci.to_move(&self.position).unwrap();
+        if let Ok(uci) = cleaned.parse::<shakmaty::uci::Uci>() {
+            let m = uci.to_move(&self.position).unwrap();
+            self.position = self.position.clone().play(&m).unwrap();
+            self.current_key = hash_board(self.position.board(), self.position.turn());
+            return;
+        }
+
+        let stripped: String = mv
+            .chars()
+            .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            .collect();
+
+        let found = self.position.legal_moves().into_iter().find(|m| {
+            let from = m.from().unwrap().to_string();
+            let to = m.to().to_string();
+            format!("{}{}", from, to) == stripped
+        });
+
+        let m = match found {
+            Some(m) => m,
+            None => panic!("unresolvable move: {}", mv),
+        };
 
         self.position = self.position.clone().play(&m).unwrap();
         self.current_key = hash_board(self.position.board(), self.position.turn());
-        return;
     }
-
-    // ---- FALLBACK (resolve from board state) ----
-    let stripped: String = mv
-        .chars()
-        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        .collect();
-
-    let found = self.position.legal_moves().into_iter().find(|m| {
-        let from = m.from().unwrap().to_string();
-        let to = m.to().to_string();
-        let coord = format!("{}{}", from, to);
-        coord == stripped
-    });
-
-    let m = match found {
-        Some(m) => m,
-        None => panic!("unresolvable move: {}", mv),
-    };
-
-    self.position = self.position.clone().play(&m).unwrap();
-    self.current_key = hash_board(self.position.board(), self.position.turn());
-}
 
     fn evaluate(&mut self, depth: u32) -> Evaluation {
         let key = self.current_key;
@@ -210,9 +219,12 @@ fn apply_move(&mut self, mv: &str) {
         }
 
         let eval = self.compute(depth);
-
         self.cache.insert(key, EvalCache { eval: eval.clone() });
 
         eval
+    }
+
+    fn evaluate_after_move(&mut self, mv: &str, depth: u32) -> Option<i32> {
+        self.evaluate_after_move_internal(mv, depth)
     }
 }
