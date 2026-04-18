@@ -6,7 +6,7 @@ use shakmaty::{Chess, Position};
 use shakmaty::fen::Fen;
 use shakmaty::EnPassantMode;
 
-use solance_core::zobrist::{hash_board, ZobristKey};
+use solance_core::zobrist::{update_key, hash_board, ZobristKey};
 
 #[derive(Debug, Clone)]
 pub struct Candidate {
@@ -159,12 +159,13 @@ impl Stockfish {
 
     fn evaluate_after_move_internal(&mut self, mv: &str, depth: u32) -> Option<i32> {
         let original = self.position.clone();
+        let original_key = self.current_key;
 
         self.apply_move(mv);
         let score = self.evaluate(depth).score;
 
         self.position = original;
-        self.current_key = hash_board(self.position.board(), self.position.turn());
+        self.current_key = original_key;
 
         score
     }
@@ -184,31 +185,25 @@ impl Engine for Stockfish {
     fn apply_move(&mut self, mv: &str) {
         let cleaned = mv.replace("-", "");
 
-        if let Ok(uci) = cleaned.parse::<shakmaty::uci::Uci>() {
-            let m = uci.to_move(&self.position).unwrap();
-            self.position = self.position.clone().play(&m).unwrap();
-            self.current_key = hash_board(self.position.board(), self.position.turn());
-            return;
-        }
+        let m = if let Ok(uci) = cleaned.parse::<shakmaty::uci::Uci>() {
+            uci.to_move(&self.position).unwrap()
+        } else {
+            let stripped: String = mv
+                .chars()
+                .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                .collect();
 
-        let stripped: String = mv
-            .chars()
-            .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-            .collect();
-
-        let found = self.position.legal_moves().into_iter().find(|m| {
-            let from = m.from().unwrap().to_string();
-            let to = m.to().to_string();
-            format!("{}{}", from, to) == stripped
-        });
-
-        let m = match found {
-            Some(m) => m,
-            None => panic!("unresolvable move: {}", mv),
+            self.position.legal_moves().into_iter().find(|m| {
+                let from = m.from().unwrap().to_string();
+                let to = m.to().to_string();
+                format!("{}{}", from, to) == stripped
+            }).expect("unresolvable move")
         };
 
+        let next_key = update_key(self.current_key, &self.position, &m);
+
         self.position = self.position.clone().play(&m).unwrap();
-        self.current_key = hash_board(self.position.board(), self.position.turn());
+        self.current_key = next_key;
     }
 
     fn evaluate(&mut self, depth: u32) -> Evaluation {

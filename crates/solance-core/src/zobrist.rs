@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
 use shakmaty::{Board, Color, Piece, Square};
+use shakmaty::{Move, Position};
 
 pub type ZobristKey = u64;
 
@@ -77,4 +78,11 @@ fn piece_index(p: Piece) -> usize {
         (Black, Queen) => 10,
         (Black, King) => 11,
     }
+}
+
+// abstraction boundary — engine must NOT call hash_board directly
+
+pub fn update_key(_prev: ZobristKey, pos: &shakmaty::Chess, mv: &Move) -> ZobristKey {
+    let next = pos.clone().play(mv).unwrap();
+    hash_board(next.board(), next.turn())
 }
