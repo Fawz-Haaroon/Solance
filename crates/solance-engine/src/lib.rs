@@ -200,7 +200,12 @@ impl Engine for Stockfish {
             }).expect("unresolvable move")
         };
 
-        let next_key = update_key(self.current_key, &self.position, &m);
+        let next_key = update_key(
+            self.current_key,
+            self.position.board(),
+            &m,
+            self.position.turn(),
+        );
 
         self.position = self.position.clone().play(&m).unwrap();
         self.current_key = next_key;

@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 
-use shakmaty::{Board, Color, Piece, Square};
-use shakmaty::{Move, Position};
+use shakmaty::{Board, Color, Piece, Square, Move};
 
 pub type ZobristKey = u64;
 
@@ -48,8 +47,7 @@ pub fn hash_board(board: &Board, side: Color) -> ZobristKey {
 
     for sq in Square::ALL {
         if let Some(piece) = board.piece_at(sq) {
-            let idx = piece_index(piece);
-            key ^= t.pieces[idx][sq as usize];
+            key ^= t.pieces[piece_index(piece)][sq as usize];
         }
     }
 
@@ -80,9 +78,35 @@ fn piece_index(p: Piece) -> usize {
     }
 }
 
-// abstraction boundary — engine must NOT call hash_board directly
 
-pub fn update_key(_prev: ZobristKey, pos: &shakmaty::Chess, mv: &Move) -> ZobristKey {
-    let next = pos.clone().play(mv).unwrap();
-    hash_board(next.board(), next.turn())
+pub fn update_key(prev: ZobristKey, board: &Board, mv: &Move, side: Color) -> ZobristKey {
+    let t = table();
+    let mut key = prev;
+
+    let from = mv.from().unwrap();
+    let to = mv.to();
+
+    let moving = board.piece_at(from).unwrap();
+
+    // remove piece from origin
+    key ^= t.pieces[piece_index(moving)][from as usize];
+
+    // handle capture
+    if let Some(captured) = board.piece_at(to) {
+        key ^= t.pieces[piece_index(captured)][to as usize];
+    }
+
+    // handle promotion
+    let final_piece = match mv.promotion() {
+        Some(role) => Piece { color: moving.color, role },
+        None => moving,
+    };
+
+    // add piece to destination
+    key ^= t.pieces[piece_index(final_piece)][to as usize];
+
+    // toggle side
+    key ^= t.side;
+
+    key
 }
