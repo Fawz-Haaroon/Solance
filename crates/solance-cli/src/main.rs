@@ -28,8 +28,9 @@ fn main() {
 
         let played_score = engine.evaluate_after_move(&m.uci, 12);
 
+        // enforce same-side comparison
         let loss = match (best_score, played_score) {
-            (Some(b), Some(p)) => Some(b - p),
+            (Some(b), Some(p)) => Some((b - p).abs()),
             _ => None,
         };
 

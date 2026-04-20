@@ -79,7 +79,9 @@ fn piece_index(p: Piece) -> usize {
 }
 
 
-pub fn update_key(prev: ZobristKey, board: &Board, mv: &Move, side: Color) -> ZobristKey {
+
+
+pub fn update_key(prev: ZobristKey, board: &Board, mv: &Move, _side: Color) -> ZobristKey {
     let t = table();
     let mut key = prev;
 
@@ -88,24 +90,19 @@ pub fn update_key(prev: ZobristKey, board: &Board, mv: &Move, side: Color) -> Zo
 
     let moving = board.piece_at(from).unwrap();
 
-    // remove piece from origin
     key ^= t.pieces[piece_index(moving)][from as usize];
 
-    // handle capture
     if let Some(captured) = board.piece_at(to) {
         key ^= t.pieces[piece_index(captured)][to as usize];
     }
 
-    // handle promotion
     let final_piece = match mv.promotion() {
         Some(role) => Piece { color: moving.color, role },
         None => moving,
     };
 
-    // add piece to destination
     key ^= t.pieces[piece_index(final_piece)][to as usize];
 
-    // toggle side
     key ^= t.side;
 
     key
