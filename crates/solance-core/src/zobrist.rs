@@ -90,12 +90,53 @@ pub fn update_key(prev: ZobristKey, board: &Board, mv: &Move, _side: Color) -> Z
 
     let moving = board.piece_at(from).unwrap();
 
+    // remove moving piece
     key ^= t.pieces[piece_index(moving)][from as usize];
 
+    // --- castling ---
+    if moving.role == shakmaty::Role::King {
+        let file_diff = (from.file() as i8 - to.file() as i8).abs();
+
+        if file_diff == 2 {
+            let rank = from.rank();
+
+            let (rook_from, rook_to) = if to.file() > from.file() {
+                // king side
+                (
+                    shakmaty::Square::from_coords(shakmaty::File::H, rank),
+                    shakmaty::Square::from_coords(shakmaty::File::F, rank),
+                )
+            } else {
+                // queen side
+                (
+                    shakmaty::Square::from_coords(shakmaty::File::A, rank),
+                    shakmaty::Square::from_coords(shakmaty::File::D, rank),
+                )
+            };
+
+            let rook = board.piece_at(rook_from).unwrap();
+
+            key ^= t.pieces[piece_index(rook)][rook_from as usize];
+            key ^= t.pieces[piece_index(rook)][rook_to as usize];
+        }
+    }
+
+    // --- capture ---
     if let Some(captured) = board.piece_at(to) {
         key ^= t.pieces[piece_index(captured)][to as usize];
     }
 
+    // --- en passant ---
+    if moving.role == shakmaty::Role::Pawn {
+        if from.file() != to.file() && board.piece_at(to).is_none() {
+            let captured_sq = shakmaty::Square::from_coords(to.file(), from.rank());
+            let captured = board.piece_at(captured_sq).unwrap();
+
+            key ^= t.pieces[piece_index(captured)][captured_sq as usize];
+        }
+    }
+
+    // --- promotion ---
     let final_piece = match mv.promotion() {
         Some(role) => Piece { color: moving.color, role },
         None => moving,
@@ -103,6 +144,7 @@ pub fn update_key(prev: ZobristKey, board: &Board, mv: &Move, _side: Color) -> Z
 
     key ^= t.pieces[piece_index(final_piece)][to as usize];
 
+    // side toggle
     key ^= t.side;
 
     key
