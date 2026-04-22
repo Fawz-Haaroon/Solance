@@ -1,12 +1,22 @@
-use crate::MoveRecord;
+use crate::AnnotatedMove;
 
-#[derive(Debug, Clone)]
-pub struct GameState {
-    pub moves: Vec<MoveRecord>,
+#[derive(Debug, Clone, Default)]
+pub struct GameMeta {
+    pub white:  Option<String>,
+    pub black:  Option<String>,
+    pub event:  Option<String>,
+    pub date:   Option<String>,
+    pub result: Option<String>,
 }
 
-impl GameState {
+#[derive(Debug, Clone)]
+pub struct Game {
+    pub meta:  GameMeta,
+    pub moves: Vec<AnnotatedMove>,
+}
+
+impl Game {
     pub fn new() -> Self {
-        Self { moves: Vec::new() }
+        Self { meta: GameMeta::default(), moves: Vec::new() }
     }
 }

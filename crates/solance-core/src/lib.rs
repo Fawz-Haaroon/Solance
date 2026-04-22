@@ -1,7 +1,7 @@
 pub mod zobrist;
 
 mod game;
-mod move_record;
+mod position;
 
-pub use game::GameState;
-pub use move_record::MoveRecord;
+pub use game::{Game, GameMeta};
+pub use position::AnnotatedMove;
