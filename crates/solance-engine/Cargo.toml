@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-shakmaty = "0.26"
 solance-core = { path = "../solance-core" }
+shakmaty = "0.26"
