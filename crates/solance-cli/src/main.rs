@@ -82,7 +82,8 @@ fn main() {
 }
 
 fn print_score_graph(moves: &[solance_analysis::MoveAnalysis]) {
-    println!("\nscore (white perspective, capped ±5):");
+    println!("
+score (white perspective, capped ±500cp):");
     for (i, mv) in moves.iter().enumerate() {
         let cp = match mv.score_before {
             Score::Cp(n)     => n.clamp(-500, 500),
