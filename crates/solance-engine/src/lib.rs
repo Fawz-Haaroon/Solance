@@ -15,8 +15,6 @@ pub enum Score {
 }
 
 impl Score {
-    // Normalized to white's perspective going in — negative means black is better.
-    // Mate(n): positive n = white mates in n, negative = black mates in n.
     pub fn centipawns(&self) -> Option<i32> {
         match self {
             Score::Cp(n) => Some(*n),
@@ -27,7 +25,7 @@ impl Score {
 
 #[derive(Debug, Clone)]
 pub struct Candidate {
-    pub mv:   String,
+    pub mv:    String,
     pub score: Score,
     pub rank:  usize,
     pub pv:    Vec<String>,
@@ -46,20 +44,32 @@ impl Evaluation {
 
 #[derive(Debug)]
 pub enum EngineError {
-    SpawnFailed(std::io::Error),
+    SpawnFailed(String, std::io::Error),
     InvalidMove(String),
+    NotReady(String),
 }
 
 impl std::fmt::Display for EngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SpawnFailed(e)  => write!(f, "failed to spawn engine process: {e}"),
-            Self::InvalidMove(mv) => write!(f, "move not legal in current position: {mv}"),
+            Self::SpawnFailed(bin, e) => write!(f, "failed to spawn '{bin}': {e}"),
+            Self::InvalidMove(mv)     => write!(f, "move not legal in current position: {mv}"),
+            Self::NotReady(msg)       => write!(f, "engine not ready: {msg}"),
         }
     }
 }
 
 impl std::error::Error for EngineError {}
+
+// The contract every engine implementation must satisfy.
+// Implementations own their internal position state — callers never
+// pass FEN directly, they drive state through reset/apply_move.
+pub trait Engine: Send {
+    fn name(&self) -> &str;
+    fn reset(&mut self);
+    fn apply_move(&mut self, uci: &str) -> Result<(), EngineError>;
+    fn evaluate(&mut self, depth: u32) -> Evaluation;
+}
 
 pub struct Stockfish {
     _child:      Child,
@@ -72,25 +82,28 @@ pub struct Stockfish {
 
 impl Stockfish {
     pub fn launch() -> Result<Self, EngineError> {
-        let mut child = Command::new("stockfish")
+        Self::launch_from("stockfish")
+    }
+
+    pub fn launch_from(binary: &str) -> Result<Self, EngineError> {
+        let mut child = Command::new(binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .map_err(EngineError::SpawnFailed)?;
+            .map_err(|e| EngineError::SpawnFailed(binary.to_owned(), e))?;
 
         let stdin  = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
-
-        let position = Chess::default();
-        let key      = hash_board(position.board(), position.turn());
+        let position    = Chess::default();
+        let current_key = hash_board(position.board(), position.turn());
 
         let mut sf = Self {
-            _child:      child,
+            _child: child,
             stdin,
-            stdout:      BufReader::new(stdout),
-            cache:       HashMap::new(),
+            stdout: BufReader::new(stdout),
+            cache: HashMap::new(),
             position,
-            current_key: key,
+            current_key,
         };
 
         sf.send("uci");
@@ -99,47 +112,6 @@ impl Stockfish {
         sf.await_token("readyok");
 
         Ok(sf)
-    }
-
-    pub fn reset(&mut self) {
-        self.cache.clear();
-        self.position    = Chess::default();
-        self.current_key = hash_board(self.position.board(), self.position.turn());
-
-        self.send("ucinewgame");
-        self.send("isready");
-        self.await_token("readyok");
-    }
-
-    pub fn apply_move(&mut self, uci: &str) -> Result<(), EngineError> {
-        let parsed: Uci = uci.parse().map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
-        let mv = parsed
-            .to_move(&self.position)
-            .map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
-
-        let next_key = update_key(
-            self.current_key,
-            self.position.board(),
-            &mv,
-            self.position.turn(),
-        );
-
-        self.position    = self.position.clone().play(&mv).unwrap();
-        self.current_key = next_key;
-
-        Ok(())
-    }
-
-    pub fn evaluate(&mut self, depth: u32) -> Evaluation {
-        let key = self.current_key;
-
-        if let Some(cached) = self.cache.get(&key) {
-            return cached.clone();
-        }
-
-        let eval = self.query_engine(depth);
-        self.cache.insert(key, eval.clone());
-        eval
     }
 
     fn send(&mut self, cmd: &str) {
@@ -163,9 +135,9 @@ impl Stockfish {
         self.send("setoption name MultiPV value 5");
         self.send(&format!("go depth {depth}"));
 
-        let white_to_move = self.position.turn().is_white();
+        let white_to_move       = self.position.turn().is_white();
         let mut candidates: Vec<Candidate> = Vec::new();
-        let mut line = String::new();
+        let mut line            = String::new();
 
         loop {
             line.clear();
@@ -173,7 +145,6 @@ impl Stockfish {
 
             if line.starts_with("info") && line.contains("multipv") {
                 if let Some(c) = parse_info_line(&line, white_to_move) {
-                    // keep only the last info line per multipv rank (highest depth)
                     if let Some(existing) = candidates.iter_mut().find(|x| x.rank == c.rank) {
                         *existing = c;
                     } else {
@@ -192,29 +163,65 @@ impl Stockfish {
     }
 }
 
+impl Engine for Stockfish {
+    fn name(&self) -> &str {
+        "Stockfish"
+    }
+
+    fn reset(&mut self) {
+        self.cache.clear();
+        self.position    = Chess::default();
+        self.current_key = hash_board(self.position.board(), self.position.turn());
+        self.send("ucinewgame");
+        self.send("isready");
+        self.await_token("readyok");
+    }
+
+    fn apply_move(&mut self, uci: &str) -> Result<(), EngineError> {
+        let parsed: Uci = uci.parse().map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
+        let mv = parsed
+            .to_move(&self.position)
+            .map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
+
+        let next_key     = update_key(self.current_key, self.position.board(), &mv, self.position.turn());
+        self.position    = self.position.clone().play(&mv).unwrap();
+        self.current_key = next_key;
+        Ok(())
+    }
+
+    fn evaluate(&mut self, depth: u32) -> Evaluation {
+        let key = self.current_key;
+        if let Some(cached) = self.cache.get(&key) {
+            return cached.clone();
+        }
+        let eval = self.query_engine(depth);
+        self.cache.insert(key, eval.clone());
+        eval
+    }
+}
+
 fn parse_info_line(line: &str, white_to_move: bool) -> Option<Candidate> {
     let parts: Vec<&str> = line.split_whitespace().collect();
 
-    let mut rank:    Option<usize>  = None;
-    let mut score:   Option<Score>  = None;
-    let mut pv_start: Option<usize> = None;
+    let mut rank:     Option<usize>  = None;
+    let mut score:    Option<Score>  = None;
+    let mut pv_start: Option<usize>  = None;
 
     let mut i = 0;
     while i < parts.len() {
         match parts[i] {
-            "multipv" => rank  = parts.get(i + 1).and_then(|v| v.parse().ok()),
-            "cp"      => {
+            "multipv" => rank = parts.get(i + 1).and_then(|v| v.parse().ok()),
+            "cp" => {
                 if let Some(raw) = parts.get(i + 1).and_then(|v| v.parse::<i32>().ok()) {
-                    // Stockfish always reports from the side to move's perspective
                     score = Some(Score::Cp(if white_to_move { raw } else { -raw }));
                 }
             }
-            "mate"    => {
+            "mate" => {
                 if let Some(raw) = parts.get(i + 1).and_then(|v| v.parse::<i32>().ok()) {
                     score = Some(Score::Mate(if white_to_move { raw } else { -raw }));
                 }
             }
-            "pv"      => { pv_start = Some(i + 1); break; }
+            "pv" => { pv_start = Some(i + 1); break; }
             _ => {}
         }
         i += 1;
@@ -225,6 +232,5 @@ fn parse_info_line(line: &str, white_to_move: bool) -> Option<Candidate> {
         .unwrap_or_default();
 
     let mv = pv.first()?.clone();
-
     Some(Candidate { mv, score: score?, rank: rank?, pv })
 }

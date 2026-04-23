@@ -1,5 +1,5 @@
 use solance_core::AnnotatedMove;
-use solance_engine::{Score, Stockfish};
+use solance_engine::{Engine, Score};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
@@ -38,16 +38,25 @@ pub struct MoveAnalysis {
 
 #[derive(Debug, Clone)]
 pub struct GameSummary {
+    pub engine_name:   String,
     pub moves:         Vec<MoveAnalysis>,
-    pub accuracy:      f32,
+    pub white_accuracy: f32,
+    pub black_accuracy: f32,
     pub turning_point: Option<usize>,
+}
+
+impl GameSummary {
+    pub fn overall_accuracy(&self) -> f32 {
+        (self.white_accuracy + self.black_accuracy) / 2.0
+    }
 }
 
 pub fn analyze_game(
     moves: &[AnnotatedMove],
-    engine: &mut Stockfish,
+    engine: &mut dyn Engine,
     depth: u32,
 ) -> GameSummary {
+    let engine_name = engine.name().to_owned();
     let mut analyses: Vec<MoveAnalysis> = Vec::with_capacity(moves.len());
 
     for mv in moves {
@@ -56,8 +65,6 @@ pub fn analyze_game(
         let best_uci     = pre.best().map(|c| c.mv.clone());
         let rank         = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
 
-        // Score of the played move as seen from this side — pulled directly from
-        // the MultiPV candidates if it appears, otherwise requires a probe.
         let played_score = pre
             .candidates
             .iter()
@@ -68,8 +75,6 @@ pub fn analyze_game(
             panic!("move {} from game record rejected by engine: {e}", mv.uci);
         });
 
-        // When the played move isn't in MultiPV we have to ask the engine what
-        // it thinks of the resulting position, then negate back to pre-move perspective.
         let score_after = match played_score {
             Some(s) => s,
             None => {
@@ -96,10 +101,11 @@ pub fn analyze_game(
         });
     }
 
-    let accuracy      = compute_accuracy(&analyses);
-    let turning_point = find_turning_point(&analyses);
+    let white_accuracy = compute_accuracy(analyses.iter().enumerate().filter(|(i, _)| i % 2 == 0).map(|(_, a)| a));
+    let black_accuracy = compute_accuracy(analyses.iter().enumerate().filter(|(i, _)| i % 2 != 0).map(|(_, a)| a));
+    let turning_point  = find_turning_point(&analyses);
 
-    GameSummary { moves: analyses, accuracy, turning_point }
+    GameSummary { engine_name, moves: analyses, white_accuracy, black_accuracy, turning_point }
 }
 
 fn negate(s: Score) -> Score {
@@ -111,9 +117,9 @@ fn negate(s: Score) -> Score {
 
 fn cp_loss(before: Score, after: Score) -> i32 {
     match (before, after) {
-        (Score::Cp(b), Score::Cp(a)) => (b - a).max(0),
+        (Score::Cp(b), Score::Cp(a))          => (b - a).max(0),
         (Score::Mate(n), Score::Cp(_)) if n > 0 => 1000,
-        _ => 0,
+        _                                      => 0,
     }
 }
 
@@ -133,15 +139,15 @@ fn classify(loss: i32, before: Score, after: Score) -> Classification {
     }
 }
 
-fn compute_accuracy(analyses: &[MoveAnalysis]) -> f32 {
-    if analyses.is_empty() {
-        return 0.0;
-    }
-    let total: f32 = analyses.iter().map(|a| {
+fn compute_accuracy<'a>(moves: impl Iterator<Item = &'a MoveAnalysis>) -> f32 {
+    let mut count = 0usize;
+    let total: f32 = moves.map(|a| {
+        count += 1;
         let loss = a.centipawn_loss.min(1000) as f32;
         (-(loss / 100.0)).exp()
     }).sum();
-    (total / analyses.len() as f32) * 100.0
+    if count == 0 { return 0.0; }
+    (total / count as f32) * 100.0
 }
 
 fn find_turning_point(analyses: &[MoveAnalysis]) -> Option<usize> {
