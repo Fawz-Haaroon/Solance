@@ -3,8 +3,8 @@ use shakmaty::{Chess, EnPassantMode, Position, san::San};
 use shakmaty::fen::Fen;
 
 use solance_core::{
-    AnnotatedMove, Game, GameMeta,
-    zobrist::{hash_board, update_key},
+    AnnotatedMove, Game,
+    zobrist::hash_board,
 };
 
 #[derive(Debug)]

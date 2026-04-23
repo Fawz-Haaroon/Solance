@@ -1,5 +1,5 @@
 use solance_core::AnnotatedMove;
-use solance_engine::{Evaluation, Score, Stockfish};
+use solance_engine::{Score, Stockfish};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
