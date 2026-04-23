@@ -7,5 +7,6 @@ members = [
     "crates/solance-engine",
     "crates/solance-analysis",
     "crates/solance-render",
-    "crates/solance-cli"
+    "crates/solance-cli",
+    "crates/solance-web",
 ]

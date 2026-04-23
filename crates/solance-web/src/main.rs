@@ -1,0 +1,141 @@
+use std::sync::Arc;
+
+use axum::{
+    Router,
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::post,
+};
+use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+use tower_http::cors::CorsLayer;
+
+use solance_analysis::{analyze_game, MoveAnalysis};
+use solance_engine::{Engine, Score, Stockfish};
+use solance_parser::GameBuilder;
+use pgn_reader::BufferedReader;
+
+#[derive(Deserialize)]
+struct AnalyzeRequest {
+    pgn:    String,
+    depth:  Option<u32>,
+    // TODO(2026-04-24): wire to engine pool once multi-engine support lands
+    #[allow(dead_code)]
+    engine: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AnalyzeResponse {
+    event:          String,
+    white:          String,
+    black:          String,
+    result:         String,
+    engine:         String,
+    depth:          u32,
+    white_accuracy: f32,
+    black_accuracy: f32,
+    turning_point:  Option<usize>,
+    moves:          Vec<MoveResponse>,
+}
+
+#[derive(Serialize)]
+struct MoveResponse {
+    move_number: usize,
+    side:        String,
+    san:         String,
+    uci:         String,
+    best_uci:    Option<String>,
+    score_cp:    Option<i32>,
+    loss_cp:     i32,
+    rank:        Option<usize>,
+    class:       String,
+}
+
+#[derive(Clone)]
+struct AppState {
+    // Single engine serialized through Mutex.
+    // TODO(2026-04-24): pool per binary path for concurrent requests.
+    engine: Arc<Mutex<Box<dyn Engine>>>,
+}
+
+#[tokio::main]
+async fn main() {
+    let engine: Box<dyn Engine> = Box::new(
+        Stockfish::launch().expect("stockfish not found — install it or set PATH")
+    );
+
+    let state = AppState {
+        engine: Arc::new(Mutex::new(engine)),
+    };
+
+    let app = Router::new()
+        .route("/analyze", post(handle_analyze))
+        .layer(CorsLayer::permissive())
+        .with_state(state);
+
+    let addr = "0.0.0.0:4242";
+    println!("solance-web listening on {addr}");
+
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn handle_analyze(
+    State(state): State<AppState>,
+    axum::extract::Json(body): axum::extract::Json<AnalyzeRequest>,
+) -> impl IntoResponse {
+    let depth = body.depth.unwrap_or(16).clamp(6, 24);
+
+    let game = {
+        let mut reader  = BufferedReader::new(body.pgn.as_bytes());
+        let mut builder = GameBuilder::new();
+        match reader.read_game(&mut builder) {
+            Ok(Some(Ok(g)))  => g,
+            Ok(Some(Err(e))) => return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("pgn parse error: {e}"),
+            ).into_response(),
+            _ => return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "no game found in pgn".to_owned(),
+            ).into_response(),
+        }
+    };
+
+    let mut engine = state.engine.lock().await;
+    engine.reset();
+
+    let summary = analyze_game(&game.moves, engine.as_mut(), depth);
+
+    let response = AnalyzeResponse {
+        event:          game.meta.event.unwrap_or_else(||  "?".into()),
+        white:          game.meta.white.unwrap_or_else(||  "?".into()),
+        black:          game.meta.black.unwrap_or_else(||  "?".into()),
+        result:         game.meta.result.unwrap_or_else(|| "*".into()),
+        engine:         summary.engine_name.clone(),
+        depth,
+        white_accuracy: summary.white_accuracy,
+        black_accuracy: summary.black_accuracy,
+        turning_point:  summary.turning_point,
+        moves:          summary.moves.iter().enumerate().map(|(i, mv)| {
+            move_to_response(i, mv)
+        }).collect(),
+    };
+
+    axum::Json(response).into_response()
+}
+
+fn move_to_response(i: usize, mv: &MoveAnalysis) -> MoveResponse {
+    MoveResponse {
+        move_number: i / 2 + 1,
+        side:        if i % 2 == 0 { "white".into() } else { "black".into() },
+        san:         mv.played_san.clone(),
+        uci:         mv.played_uci.clone(),
+        best_uci:    mv.best_uci.clone(),
+        score_cp:    match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
+        loss_cp:     mv.centipawn_loss,
+        rank:        mv.rank,
+        class:       mv.class.to_string(),
+    }
+}

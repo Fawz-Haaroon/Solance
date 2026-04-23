@@ -1,0 +1,17 @@
+[package]
+name = "solance-web"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solance-core     = { path = "../solance-core" }
+solance-parser   = { path = "../solance-parser" }
+solance-engine   = { path = "../solance-engine" }
+solance-analysis = { path = "../solance-analysis" }
+
+axum             = { version = "0.8", features = ["macros"] }
+tokio            = { version = "1", features = ["full"] }
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1"
+tower-http       = { version = "0.6", features = ["cors", "fs"] }
+pgn-reader       = "0.25"
