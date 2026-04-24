@@ -1,0 +1,38 @@
+export type Classification =
+    | 'best'
+    | 'excellent'
+    | 'good'
+    | 'inaccuracy'
+    | 'mistake'
+    | 'blunder'
+
+export interface MoveResponse {
+    move_number: number
+    side:        'white' | 'black'
+    san:         string
+    uci:         string
+    best_uci:    string | null
+    score_cp:    number | null
+    loss_cp:     number
+    rank:        number | null
+    class:       Classification
+}
+
+export interface AnalysisResponse {
+    event:          string
+    white:          string
+    black:          string
+    result:         string
+    engine:         string
+    depth:          number
+    white_accuracy: number
+    black_accuracy: number
+    turning_point:  number | null
+    moves:          MoveResponse[]
+}
+
+export interface AnalyzeRequest {
+    pgn:     string
+    depth?:  number
+    engine?: string
+}
