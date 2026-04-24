@@ -18,9 +18,8 @@ use pgn_reader::BufferedReader;
 
 #[derive(Deserialize)]
 struct AnalyzeRequest {
-    pgn:    String,
-    depth:  Option<u32>,
-    // TODO(2026-04-24): wire to engine pool once multi-engine support lands
+    pgn:   String,
+    depth: Option<u32>,
     #[allow(dead_code)]
     engine: Option<String>,
 }
@@ -41,21 +40,20 @@ struct AnalyzeResponse {
 
 #[derive(Serialize)]
 struct MoveResponse {
-    move_number: usize,
-    side:        String,
-    san:         String,
-    uci:         String,
-    best_uci:    Option<String>,
-    score_cp:    Option<i32>,
-    loss_cp:     i32,
-    rank:        Option<usize>,
-    class:       String,
+    move_number:      usize,
+    side:             String,
+    san:              String,
+    uci:              String,
+    best_uci:         Option<String>,
+    score_cp:         Option<i32>,
+    loss_cp:          i32,
+    win_percent_loss: f64,
+    rank:             Option<usize>,
+    class:            String,
 }
 
 #[derive(Clone)]
 struct AppState {
-    // Single engine serialized through Mutex.
-    // TODO(2026-04-24): pool per binary path for concurrent requests.
     engine: Arc<Mutex<Box<dyn Engine>>>,
 }
 
@@ -128,14 +126,15 @@ async fn handle_analyze(
 
 fn move_to_response(i: usize, mv: &MoveAnalysis) -> MoveResponse {
     MoveResponse {
-        move_number: i / 2 + 1,
-        side:        if i % 2 == 0 { "white".into() } else { "black".into() },
-        san:         mv.played_san.clone(),
-        uci:         mv.played_uci.clone(),
-        best_uci:    mv.best_uci.clone(),
-        score_cp:    match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
-        loss_cp:     mv.centipawn_loss,
-        rank:        mv.rank,
-        class:       mv.class.to_string(),
+        move_number:      i / 2 + 1,
+        side:             if i % 2 == 0 { "white".into() } else { "black".into() },
+        san:              mv.played_san.clone(),
+        uci:              mv.played_uci.clone(),
+        best_uci:         mv.best_uci.clone(),
+        score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
+        loss_cp:          mv.centipawn_loss,
+        win_percent_loss: mv.win_percent_loss,
+        rank:             mv.rank,
+        class:            mv.class.to_string(),
     }
 }
