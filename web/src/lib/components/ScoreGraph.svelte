@@ -1,16 +1,29 @@
 <script lang="ts">
     import type { MoveResponse } from '../types/analysis'
 
-    const { moves }: { moves: MoveResponse[] } = $props()
+    const { moves, onMoveClick }: {
+        moves:        MoveResponse[]
+        onMoveClick?: (index: number) => void
+    } = $props()
 
     const BAR_MAX = 500
 
-    function barHeight(cp: number | null): number {
-        if (cp === null) return 50
-        return 50 + (Math.min(Math.max(cp, -BAR_MAX), BAR_MAX) / BAR_MAX) * 50
+    // Returns % from top (0 = top, 100 = bottom).
+    // Positive score = bar extends upward from midpoint (50%).
+    // Negative score = bar extends downward from midpoint.
+    function whiteSegment(cp: number | null): { top: number; height: number } {
+        const clamped = Math.min(Math.max(cp ?? 0, -BAR_MAX), BAR_MAX)
+        if (clamped >= 0) {
+            const h = (clamped / BAR_MAX) * 50
+            return { top: 50 - h, height: h }
+        } else {
+            const h = (-clamped / BAR_MAX) * 50
+            return { top: 50, height: h }
+        }
     }
 
-    function classColor(cls: string): string {
+    function classColor(cls: string, cp: number | null): string {
+        if (cp !== null && cp < 0) return '#334'
         switch (cls) {
             case 'best':       return '#5cb85c'
             case 'excellent':  return '#8bc34a'
@@ -18,27 +31,32 @@
             case 'inaccuracy': return '#ffb74d'
             case 'mistake':    return '#ff7043'
             case 'blunder':    return '#e53935'
-            default:           return '#888'
+            default:           return '#5cb85c'
         }
     }
 </script>
 
 <div class="graph-wrap">
-    <div class="axis-label top">+5</div>
+    <span class="axis-label top">+5</span>
+    <span class="axis-label mid">0</span>
+    <span class="axis-label bot">-5</span>
+
     <div class="bars">
-        {#each moves as mv}
-            <div
-                class="bar-slot"
+        {#each moves as mv, i}
+            {@const seg = whiteSegment(mv.score_cp)}
+            <button
+                class="bar-col"
                 title="{mv.move_number}{mv.side === 'white' ? 'W' : 'B'} {mv.san} ({mv.loss_cp}cp loss)"
+                onclick={() => onMoveClick?.(i)}
             >
                 <div
-                    class="bar"
-                    style="height: {barHeight(mv.score_cp)}%; background: {classColor(mv.class)};"
+                    class="bar-fill"
+                    style="top: {seg.top}%; height: {Math.max(seg.height, 1)}%; background: {classColor(mv.class, mv.score_cp)};"
                 ></div>
-            </div>
+            </button>
         {/each}
     </div>
-    <div class="axis-label bottom">-5</div>
+
     <div class="midline"></div>
 </div>
 
@@ -46,30 +64,34 @@
     .graph-wrap {
         position: relative;
         width: 100%;
-        height: 120px;
-        background: #1a1a2e;
-        border-radius: 6px;
+        height: 140px;
+        background: #0f0f1e;
+        border-radius: 8px;
         overflow: hidden;
-        margin: 1.5rem 0;
+        border: 1px solid #1e1e36;
     }
     .bars {
         display: flex;
-        align-items: flex-end;
+        align-items: stretch;
         height: 100%;
         gap: 1px;
-        padding: 0 4px;
+        padding: 0 2px;
     }
-    .bar-slot {
+    .bar-col {
         flex: 1;
-        height: 100%;
-        display: flex;
-        align-items: flex-end;
+        position: relative;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0;
     }
-    .bar {
-        width: 100%;
-        min-height: 2px;
-        transition: height 0.2s ease;
-        border-radius: 2px 2px 0 0;
+    .bar-col:hover .bar-fill { filter: brightness(1.3); }
+    .bar-fill {
+        position: absolute;
+        left: 1px;
+        right: 1px;
+        border-radius: 1px;
+        transition: filter 0.1s;
     }
     .midline {
         position: absolute;
@@ -77,16 +99,19 @@
         left: 0;
         right: 0;
         height: 1px;
-        background: rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.12);
         pointer-events: none;
     }
     .axis-label {
         position: absolute;
-        left: 4px;
-        font-size: 10px;
-        color: rgba(255,255,255,0.3);
+        left: 5px;
+        font-size: 9px;
+        color: rgba(255,255,255,0.2);
         font-family: monospace;
+        pointer-events: none;
+        line-height: 1;
     }
-    .axis-label.top    { top: 2px; }
-    .axis-label.bottom { bottom: 2px; }
+    .axis-label.top { top:  4px; }
+    .axis-label.mid { top: calc(50% - 5px); }
+    .axis-label.bot { bottom: 4px; }
 </style>
