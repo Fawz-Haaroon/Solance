@@ -26,15 +26,15 @@ impl std::fmt::Display for Classification {
 
 #[derive(Debug, Clone)]
 pub struct MoveAnalysis {
-    pub played_uci:     String,
-    pub played_san:     String,
-    pub best_uci:       Option<String>,
-    pub score_before:   Score,
-    pub score_after:    Score,
-    pub centipawn_loss: i32,
+    pub played_uci:       String,
+    pub played_san:       String,
+    pub best_uci:         Option<String>,
+    pub score_before:     Score,
+    pub score_after:      Score,
+    pub centipawn_loss:   i32,
     pub win_percent_loss: f64,
-    pub rank:           Option<usize>,
-    pub class:          Classification,
+    pub rank:             Option<usize>,
+    pub class:            Classification,
 }
 
 #[derive(Debug, Clone)]
@@ -60,24 +60,20 @@ pub fn analyze_game(
         let best_uci     = pre.best().map(|c| c.mv.clone());
         let rank         = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
 
-        let played_score = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.score);
-
         engine.apply_move(&mv.uci).unwrap_or_else(|e| {
             panic!("move {} from game record rejected by engine: {e}", mv.uci);
         });
 
-        let score_after = match played_score {
-            Some(s) => s,
-            None => {
-                let post = engine.evaluate(depth);
-                match post.best() {
-                    Some(c) => negate(c.score),
-                    None    => Score::Cp(0),
-                }
-            }
+        // Always evaluate the resulting position — do not use the MultiPV candidate
+        // score as a proxy. MultiPV scores are from the pre-move search and are
+        // not equivalent to a fresh search of the resulting position at the same depth.
+        let post         = engine.evaluate(depth);
+        let score_after  = match post.best() {
+            Some(c) => negate(c.score),
+            None    => Score::Cp(0),
         };
 
-        let centipawn_loss  = cp_loss(score_before, score_after);
+        let centipawn_loss   = cp_loss(score_before, score_after);
         let win_percent_loss = win_percent_loss(score_before, score_after);
         let class            = classify(centipawn_loss, score_before, score_after);
 
@@ -116,7 +112,6 @@ fn cp_loss(before: Score, after: Score) -> i32 {
     }
 }
 
-// Win probability from centipawns — Lichess model.
 fn win_percent(score: Score) -> f64 {
     let cp = match score {
         Score::Cp(n)   => n as f64,
@@ -129,15 +124,11 @@ fn win_percent_loss(before: Score, after: Score) -> f64 {
     (win_percent(before) - win_percent(after)).max(0.0)
 }
 
-// Lichess accuracy formula: maps average win% loss per move to an accuracy percentage.
-// Source: https://lichess.org/page/accuracy
 fn lichess_accuracy<'a>(moves: impl Iterator<Item = &'a MoveAnalysis>) -> f32 {
     let mut count = 0usize;
     let total_wpl: f64 = moves.map(|a| { count += 1; a.win_percent_loss }).sum();
-    if count == 0 {
-        return 0.0;
-    }
-    let avg_wpl = total_wpl / count as f64;
+    if count == 0 { return 0.0; }
+    let avg_wpl  = total_wpl / count as f64;
     let accuracy = 103.1668 * (-0.04354 * avg_wpl * 100.0).exp() - 3.1669;
     accuracy.clamp(0.0, 100.0) as f32
 }
