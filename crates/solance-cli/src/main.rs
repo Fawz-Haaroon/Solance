@@ -149,3 +149,18 @@ fn print_score_graph(moves: &[MoveAnalysis]) {
         );
     }
 }
+
+fn debug_run(pgn_path: &str) {
+    use std::fs::File;
+    use std::io::BufReader;
+    use pgn_reader::BufferedReader;
+    use solance_parser::GameBuilder;
+    use solance_engine::Stockfish;
+    use solance_analysis::debug_first_moves;
+
+    let file    = File::open(pgn_path).unwrap();
+    let mut rdr = BufferedReader::new(BufReader::new(file));
+    let game    = rdr.read_game(&mut GameBuilder::new()).unwrap().unwrap().unwrap();
+    let mut eng = Stockfish::launch().unwrap();
+    debug_first_moves(&game.moves, &mut eng, 16);
+}

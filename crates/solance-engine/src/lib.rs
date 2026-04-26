@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-use shakmaty::{Chess, EnPassantMode, Position};
-use shakmaty::fen::Fen;
+use shakmaty::{Chess, Position};
 use shakmaty::uci::Uci;
 
 use solance_core::zobrist::{hash_board, update_key, ZobristKey};
@@ -16,10 +14,7 @@ pub enum Score {
 
 impl Score {
     pub fn centipawns(&self) -> Option<i32> {
-        match self {
-            Score::Cp(n) => Some(*n),
-            Score::Mate(_) => None,
-        }
+        match self { Score::Cp(n) => Some(*n), Score::Mate(_) => None }
     }
 }
 
@@ -46,7 +41,6 @@ impl Evaluation {
 pub enum EngineError {
     SpawnFailed(String, std::io::Error),
     InvalidMove(String),
-    NotReady(String),
 }
 
 impl std::fmt::Display for EngineError {
@@ -54,30 +48,27 @@ impl std::fmt::Display for EngineError {
         match self {
             Self::SpawnFailed(bin, e) => write!(f, "failed to spawn '{bin}': {e}"),
             Self::InvalidMove(mv)     => write!(f, "move not legal in current position: {mv}"),
-            Self::NotReady(msg)       => write!(f, "engine not ready: {msg}"),
         }
     }
 }
 
 impl std::error::Error for EngineError {}
 
-// The contract every engine implementation must satisfy.
-// Implementations own their internal position state — callers never
-// pass FEN directly, they drive state through reset/apply_move.
 pub trait Engine: Send {
     fn name(&self) -> &str;
     fn reset(&mut self);
     fn apply_move(&mut self, uci: &str) -> Result<(), EngineError>;
     fn evaluate(&mut self, depth: u32) -> Evaluation;
+    fn current_key(&self) -> ZobristKey;
 }
 
 pub struct Stockfish {
     _child:      Child,
     stdin:       ChildStdin,
     stdout:      BufReader<ChildStdout>,
-    cache:       HashMap<ZobristKey, Evaluation>,
     position:    Chess,
     current_key: ZobristKey,
+    move_stack:  Vec<String>,
 }
 
 impl Stockfish {
@@ -92,8 +83,8 @@ impl Stockfish {
             .spawn()
             .map_err(|e| EngineError::SpawnFailed(binary.to_owned(), e))?;
 
-        let stdin  = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
+        let stdin       = child.stdin.take().unwrap();
+        let stdout      = child.stdout.take().unwrap();
         let position    = Chess::default();
         let current_key = hash_board(position.board(), position.turn());
 
@@ -101,13 +92,14 @@ impl Stockfish {
             _child: child,
             stdin,
             stdout: BufReader::new(stdout),
-            cache: HashMap::new(),
             position,
             current_key,
+            move_stack: Vec::new(),
         };
 
         sf.send("uci");
         sf.await_token("uciok");
+        sf.send("setoption name MultiPV value 5");
         sf.send("isready");
         sf.await_token("readyok");
 
@@ -116,6 +108,13 @@ impl Stockfish {
 
     fn send(&mut self, cmd: &str) {
         writeln!(self.stdin, "{cmd}").unwrap();
+    }
+
+    // Drain any pending output then wait for readyok.
+    // This guarantees the previous search is fully consumed before we start a new one.
+    fn sync(&mut self) {
+        self.send("isready");
+        self.await_token("readyok");
     }
 
     fn await_token(&mut self, token: &str) {
@@ -130,9 +129,16 @@ impl Stockfish {
     }
 
     fn query_engine(&mut self, depth: u32) -> Evaluation {
-        let fen = Fen::from_position(self.position.clone(), EnPassantMode::Legal).to_string();
-        self.send(&format!("position fen {fen}"));
-        self.send("setoption name MultiPV value 5");
+        // Sync first — drain any stale output from a previous search.
+        self.sync();
+
+        let pos_cmd = if self.move_stack.is_empty() {
+            "position startpos".to_owned()
+        } else {
+            format!("position startpos moves {}", self.move_stack.join(" "))
+        };
+
+        self.send(&pos_cmd);
         self.send(&format!("go depth {depth}"));
 
         let white_to_move       = self.position.turn().is_white();
@@ -143,7 +149,7 @@ impl Stockfish {
             line.clear();
             self.stdout.read_line(&mut line).unwrap();
 
-            if line.starts_with("info") && line.contains("multipv") {
+            if line.starts_with("info") && line.contains(" pv ") {
                 if let Some(c) = parse_info_line(&line, white_to_move) {
                     if let Some(existing) = candidates.iter_mut().find(|x| x.rank == c.rank) {
                         *existing = c;
@@ -164,21 +170,20 @@ impl Stockfish {
 }
 
 impl Engine for Stockfish {
-    fn name(&self) -> &str {
-        "Stockfish"
-    }
+    fn name(&self) -> &str { "Stockfish" }
 
     fn reset(&mut self) {
-        self.cache.clear();
         self.position    = Chess::default();
         self.current_key = hash_board(self.position.board(), self.position.turn());
+        self.move_stack.clear();
         self.send("ucinewgame");
         self.send("isready");
         self.await_token("readyok");
     }
 
     fn apply_move(&mut self, uci: &str) -> Result<(), EngineError> {
-        let parsed: Uci = uci.parse().map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
+        let parsed: Uci = uci.parse()
+            .map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
         let mv = parsed
             .to_move(&self.position)
             .map_err(|_| EngineError::InvalidMove(uci.to_owned()))?;
@@ -186,28 +191,27 @@ impl Engine for Stockfish {
         let next_key     = update_key(self.current_key, self.position.board(), &mv, self.position.turn());
         self.position    = self.position.clone().play(&mv).unwrap();
         self.current_key = next_key;
+        self.move_stack.push(uci.to_owned());
         Ok(())
     }
 
     fn evaluate(&mut self, depth: u32) -> Evaluation {
-        let key = self.current_key;
-        if let Some(cached) = self.cache.get(&key) {
-            return cached.clone();
-        }
-        let eval = self.query_engine(depth);
-        self.cache.insert(key, eval.clone());
-        eval
+        self.query_engine(depth)
+    }
+
+    fn current_key(&self) -> ZobristKey {
+        self.current_key
     }
 }
 
 fn parse_info_line(line: &str, white_to_move: bool) -> Option<Candidate> {
     let parts: Vec<&str> = line.split_whitespace().collect();
 
-    let mut rank:     Option<usize>  = None;
-    let mut score:    Option<Score>  = None;
-    let mut pv_start: Option<usize>  = None;
-
+    let mut rank:     Option<usize> = None;
+    let mut score:    Option<Score> = None;
+    let mut pv_start: Option<usize> = None;
     let mut i = 0;
+
     while i < parts.len() {
         match parts[i] {
             "multipv" => rank = parts.get(i + 1).and_then(|v| v.parse().ok()),

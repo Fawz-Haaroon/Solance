@@ -35,6 +35,7 @@ pub struct MoveAnalysis {
     pub win_percent_loss: f64,
     pub rank:             Option<usize>,
     pub class:            Classification,
+    pub decided:          bool,
 }
 
 #[derive(Debug, Clone)]
@@ -54,28 +55,42 @@ pub fn analyze_game(
     let engine_name = engine.name().to_owned();
     let mut analyses: Vec<MoveAnalysis> = Vec::with_capacity(moves.len());
 
+    // Evaluate the starting position once, then walk forward move by move.
+    // Each iteration: evaluate current position → apply move → the score of the
+    // played move comes from the NEXT position's evaluation (negated), not a
+    // second call on the same position.
+    //
+    // This means we need N+1 evaluations for N moves, but each evaluation is
+    // called exactly once per position — no double-evaluation, no stale output.
+    let mut evals = Vec::with_capacity(moves.len() + 1);
+
     for mv in moves {
-        let pre          = engine.evaluate(depth);
+        evals.push(engine.evaluate(depth));
+        engine.apply_move(&mv.uci).unwrap_or_else(|e| {
+            panic!("move {} rejected by engine: {e}", mv.uci);
+        });
+    }
+    // Final position evaluation (after last move).
+    evals.push(engine.evaluate(depth));
+
+    for (i, mv) in moves.iter().enumerate() {
+        let pre  = &evals[i];
+        let post = &evals[i + 1];
+
         let score_before = pre.best().map(|c| c.score).unwrap_or(Score::Cp(0));
         let best_uci     = pre.best().map(|c| c.mv.clone());
         let rank         = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
 
-        engine.apply_move(&mv.uci).unwrap_or_else(|e| {
-            panic!("move {} from game record rejected by engine: {e}", mv.uci);
-        });
-
-        // Always evaluate the resulting position — do not use the MultiPV candidate
-        // score as a proxy. MultiPV scores are from the pre-move search and are
-        // not equivalent to a fresh search of the resulting position at the same depth.
-        let post         = engine.evaluate(depth);
-        let score_after  = match post.best() {
+        // Post-move eval is from the opponent's perspective — negate to white-relative.
+        let score_after = match post.best() {
             Some(c) => negate(c.score),
             None    => Score::Cp(0),
         };
 
-        let centipawn_loss   = cp_loss(score_before, score_after);
-        let win_percent_loss = win_percent_loss(score_before, score_after);
-        let class            = classify(centipawn_loss, score_before, score_after);
+        let decided          = matches!(score_before, Score::Mate(_));
+        let centipawn_loss   = display_cp_loss(score_before, score_after);
+        let win_percent_loss = if decided { 0.0 } else { wpl(score_before, score_after) };
+        let class            = classify(win_percent_loss, score_before, score_after, decided);
 
         analyses.push(MoveAnalysis {
             played_uci: mv.uci.clone(),
@@ -87,12 +102,21 @@ pub fn analyze_game(
             win_percent_loss,
             rank,
             class,
+            decided,
         });
     }
 
-    let white_accuracy = lichess_accuracy(analyses.iter().enumerate().filter(|(i, _)| i % 2 == 0).map(|(_, a)| a));
-    let black_accuracy = lichess_accuracy(analyses.iter().enumerate().filter(|(i, _)| i % 2 != 0).map(|(_, a)| a));
-    let turning_point  = find_turning_point(&analyses);
+    let white_accuracy = lichess_accuracy(
+        analyses.iter().enumerate()
+            .filter(|(i, a)| i % 2 == 0 && !a.decided)
+            .map(|(_, a)| a)
+    );
+    let black_accuracy = lichess_accuracy(
+        analyses.iter().enumerate()
+            .filter(|(i, a)| i % 2 != 0 && !a.decided)
+            .map(|(_, a)| a)
+    );
+    let turning_point = find_turning_point(&analyses);
 
     GameSummary { engine_name, moves: analyses, white_accuracy, black_accuracy, turning_point }
 }
@@ -104,28 +128,44 @@ fn negate(s: Score) -> Score {
     }
 }
 
-fn cp_loss(before: Score, after: Score) -> i32 {
-    match (before, after) {
-        (Score::Cp(b), Score::Cp(a))            => (b - a).max(0),
-        (Score::Mate(n), Score::Cp(_)) if n > 0 => 1000,
-        _                                        => 0,
-    }
-}
-
-fn win_percent(score: Score) -> f64 {
-    let cp = match score {
+fn win_prob(s: Score) -> f64 {
+    let cp: f64 = match s {
         Score::Cp(n)   => n as f64,
         Score::Mate(n) => if n > 0 { 10000.0 } else { -10000.0 },
     };
     1.0 / (1.0 + (-0.00368208 * cp).exp())
 }
 
-fn win_percent_loss(before: Score, after: Score) -> f64 {
-    (win_percent(before) - win_percent(after)).max(0.0)
+fn wpl(before: Score, after: Score) -> f64 {
+    (win_prob(before) - win_prob(after)).max(0.0)
+}
+
+fn display_cp_loss(before: Score, after: Score) -> i32 {
+    match (before, after) {
+        (Score::Cp(b), Score::Cp(a))            => (b - a).max(0).min(1000),
+        (Score::Mate(n), Score::Cp(_)) if n > 0 => 1000,
+        (Score::Cp(_), Score::Mate(n)) if n > 0 => 0,
+        _                                        => 0,
+    }
+}
+
+fn classify(wpl: f64, before: Score, after: Score, decided: bool) -> Classification {
+    if decided { return Classification::Best; }
+    if matches!(before, Score::Mate(n) if n > 0) {
+        if !matches!(after, Score::Mate(n) if n > 0) {
+            return Classification::Blunder;
+        }
+    }
+    if wpl < 0.02  { return Classification::Best; }
+    if wpl < 0.05  { return Classification::Excellent; }
+    if wpl < 0.10  { return Classification::Good; }
+    if wpl < 0.175 { return Classification::Inaccuracy; }
+    if wpl < 0.30  { return Classification::Mistake; }
+    Classification::Blunder
 }
 
 fn lichess_accuracy<'a>(moves: impl Iterator<Item = &'a MoveAnalysis>) -> f32 {
-    let mut count = 0usize;
+    let mut count      = 0usize;
     let total_wpl: f64 = moves.map(|a| { count += 1; a.win_percent_loss }).sum();
     if count == 0 { return 0.0; }
     let avg_wpl  = total_wpl / count as f64;
@@ -133,27 +173,11 @@ fn lichess_accuracy<'a>(moves: impl Iterator<Item = &'a MoveAnalysis>) -> f32 {
     accuracy.clamp(0.0, 100.0) as f32
 }
 
-fn classify(loss: i32, before: Score, after: Score) -> Classification {
-    if matches!(before, Score::Mate(n) if n > 0) {
-        if !matches!(after, Score::Mate(n) if n > 0) {
-            return Classification::Blunder;
-        }
-    }
-    match loss {
-        0..=10    => Classification::Best,
-        11..=30   => Classification::Excellent,
-        31..=80   => Classification::Good,
-        81..=150  => Classification::Inaccuracy,
-        151..=300 => Classification::Mistake,
-        _         => Classification::Blunder,
-    }
-}
-
 fn find_turning_point(analyses: &[MoveAnalysis]) -> Option<usize> {
     analyses.windows(2).enumerate().find_map(|(i, w)| {
-        let sign_before = cp_of(w[0].score_before);
-        let sign_after  = cp_of(w[1].score_after);
-        if sign_before * sign_after < 0 && w[0].centipawn_loss >= 150 {
+        let before = win_prob(w[0].score_before);
+        let after  = win_prob(w[1].score_after);
+        if (before - 0.5) * (after - 0.5) < 0.0 && w[0].win_percent_loss > 0.15 {
             Some(i)
         } else {
             None
@@ -161,9 +185,28 @@ fn find_turning_point(analyses: &[MoveAnalysis]) -> Option<usize> {
     })
 }
 
-fn cp_of(s: Score) -> i32 {
-    match s {
-        Score::Cp(n)   => n,
-        Score::Mate(n) => if n > 0 { 30000 } else { -30000 },
+pub fn debug_first_moves(
+    moves: &[AnnotatedMove],
+    engine: &mut dyn Engine,
+    depth: u32,
+) {
+    let mut evals = Vec::new();
+    for mv in moves.iter().take(8) {
+        evals.push(engine.evaluate(depth));
+        engine.apply_move(&mv.uci).unwrap();
+    }
+    evals.push(engine.evaluate(depth));
+
+    for (i, mv) in moves.iter().take(8).enumerate() {
+        let pre  = &evals[i];
+        let post = &evals[i + 1];
+        let sb = pre.best().map(|c| c.score).unwrap_or(Score::Cp(0));
+        let sa = post.best().map(|c| negate(c.score)).unwrap_or(Score::Cp(0));
+        eprintln!("move {:>2} {:>6}  pre={:?}  post_raw={:?}  after={:?}",
+            i+1, mv.san,
+            sb,
+            post.best().map(|c| c.score),
+            sa,
+        );
     }
 }
