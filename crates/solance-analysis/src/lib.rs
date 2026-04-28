@@ -53,25 +53,19 @@ pub fn analyze_game(
     depth: u32,
 ) -> GameSummary {
     let engine_name = engine.name().to_owned();
-    let mut analyses: Vec<MoveAnalysis> = Vec::with_capacity(moves.len());
 
-    // Evaluate the starting position once, then walk forward move by move.
-    // Each iteration: evaluate current position → apply move → the score of the
-    // played move comes from the NEXT position's evaluation (negated), not a
-    // second call on the same position.
-    //
-    // This means we need N+1 evaluations for N moves, but each evaluation is
-    // called exactly once per position — no double-evaluation, no stale output.
+    // Collect N+1 evaluations for N moves. Each eval is white-relative
+    // as normalized by the engine's parse_info_line.
     let mut evals = Vec::with_capacity(moves.len() + 1);
-
     for mv in moves {
         evals.push(engine.evaluate(depth));
         engine.apply_move(&mv.uci).unwrap_or_else(|e| {
             panic!("move {} rejected by engine: {e}", mv.uci);
         });
     }
-    // Final position evaluation (after last move).
     evals.push(engine.evaluate(depth));
+
+    let mut analyses: Vec<MoveAnalysis> = Vec::with_capacity(moves.len());
 
     for (i, mv) in moves.iter().enumerate() {
         let pre  = &evals[i];
@@ -81,11 +75,11 @@ pub fn analyze_game(
         let best_uci     = pre.best().map(|c| c.mv.clone());
         let rank         = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
 
-        // Post-move eval is from the opponent's perspective — negate to white-relative.
-        let score_after = match post.best() {
-            Some(c) => negate(c.score),
-            None    => Score::Cp(0),
-        };
+        // The engine normalizes scores to the side-to-move's perspective.
+        // After white moves (i%2==0), post is from black's perspective — negate.
+        // After black moves (i%2==1), post is from white's perspective — keep.
+        let post_raw    = post.best().map(|c| c.score).unwrap_or(Score::Cp(0));
+        let score_after = if i % 2 == 0 { negate(post_raw) } else { post_raw };
 
         let decided          = matches!(score_before, Score::Mate(_));
         let centipawn_loss   = display_cp_loss(score_before, score_after);
@@ -183,30 +177,4 @@ fn find_turning_point(analyses: &[MoveAnalysis]) -> Option<usize> {
             None
         }
     })
-}
-
-pub fn debug_first_moves(
-    moves: &[AnnotatedMove],
-    engine: &mut dyn Engine,
-    depth: u32,
-) {
-    let mut evals = Vec::new();
-    for mv in moves.iter().take(8) {
-        evals.push(engine.evaluate(depth));
-        engine.apply_move(&mv.uci).unwrap();
-    }
-    evals.push(engine.evaluate(depth));
-
-    for (i, mv) in moves.iter().take(8).enumerate() {
-        let pre  = &evals[i];
-        let post = &evals[i + 1];
-        let sb = pre.best().map(|c| c.score).unwrap_or(Score::Cp(0));
-        let sa = post.best().map(|c| negate(c.score)).unwrap_or(Score::Cp(0));
-        eprintln!("move {:>2} {:>6}  pre={:?}  post_raw={:?}  after={:?}",
-            i+1, mv.san,
-            sb,
-            post.best().map(|c| c.score),
-            sa,
-        );
-    }
 }
