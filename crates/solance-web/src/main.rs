@@ -1,12 +1,6 @@
 use std::sync::Arc;
 
-use axum::{
-    Router,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-};
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
@@ -44,12 +38,14 @@ struct MoveResponse {
     side:             String,
     san:              String,
     uci:              String,
+    fen_before:       String,
     best_uci:         Option<String>,
     score_cp:         Option<i32>,
     loss_cp:          i32,
     win_percent_loss: f64,
     rank:             Option<usize>,
     class:            String,
+    decided:          bool,
 }
 
 #[derive(Clone)]
@@ -60,22 +56,15 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     let engine: Box<dyn Engine> = Box::new(
-        Stockfish::launch().expect("stockfish not found — install it or set PATH")
+        Stockfish::launch().expect("stockfish not found")
     );
-
-    let state = AppState {
-        engine: Arc::new(Mutex::new(engine)),
-    };
-
+    let state = AppState { engine: Arc::new(Mutex::new(engine)) };
     let app = Router::new()
         .route("/analyze", post(handle_analyze))
         .layer(CorsLayer::permissive())
         .with_state(state);
-
-    let addr = "0.0.0.0:4242";
-    println!("solance-web listening on {addr}");
-
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    println!("solance-web listening on 0.0.0.0:4242");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:4242").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -90,51 +79,42 @@ async fn handle_analyze(
         let mut builder = GameBuilder::new();
         match reader.read_game(&mut builder) {
             Ok(Some(Ok(g)))  => g,
-            Ok(Some(Err(e))) => return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                format!("pgn parse error: {e}"),
-            ).into_response(),
-            _ => return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "no game found in pgn".to_owned(),
-            ).into_response(),
+            Ok(Some(Err(e))) => return (StatusCode::UNPROCESSABLE_ENTITY, format!("pgn parse error: {e}")).into_response(),
+            _                => return (StatusCode::UNPROCESSABLE_ENTITY, "no game found in pgn".to_owned()).into_response(),
         }
     };
 
     let mut engine = state.engine.lock().await;
     engine.reset();
-
     let summary = analyze_game(&game.moves, engine.as_mut(), depth);
 
-    let response = AnalyzeResponse {
-        event:          game.meta.event.unwrap_or_else(||  "?".into()),
-        white:          game.meta.white.unwrap_or_else(||  "?".into()),
-        black:          game.meta.black.unwrap_or_else(||  "?".into()),
+    let moves = summary.moves.iter().enumerate().zip(game.moves.iter()).map(|((i, mv), annotated)| {
+        MoveResponse {
+            move_number:      i / 2 + 1,
+            side:             if i % 2 == 0 { "white".into() } else { "black".into() },
+            san:              mv.played_san.clone(),
+            uci:              mv.played_uci.clone(),
+            fen_before:       annotated.fen_before.clone(),
+            best_uci:         mv.best_uci.clone(),
+            score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
+            loss_cp:          mv.centipawn_loss,
+            win_percent_loss: mv.win_percent_loss,
+            rank:             mv.rank,
+            class:            mv.class.to_string(),
+            decided:          mv.decided,
+        }
+    }).collect();
+
+    axum::Json(AnalyzeResponse {
+        event:          game.meta.event.unwrap_or_else(|| "?".into()),
+        white:          game.meta.white.unwrap_or_else(|| "?".into()),
+        black:          game.meta.black.unwrap_or_else(|| "?".into()),
         result:         game.meta.result.unwrap_or_else(|| "*".into()),
-        engine:         summary.engine_name.clone(),
+        engine:         summary.engine_name,
         depth,
         white_accuracy: summary.white_accuracy,
         black_accuracy: summary.black_accuracy,
         turning_point:  summary.turning_point,
-        moves:          summary.moves.iter().enumerate().map(|(i, mv)| {
-            move_to_response(i, mv)
-        }).collect(),
-    };
-
-    axum::Json(response).into_response()
-}
-
-fn move_to_response(i: usize, mv: &MoveAnalysis) -> MoveResponse {
-    MoveResponse {
-        move_number:      i / 2 + 1,
-        side:             if i % 2 == 0 { "white".into() } else { "black".into() },
-        san:              mv.played_san.clone(),
-        uci:              mv.played_uci.clone(),
-        best_uci:         mv.best_uci.clone(),
-        score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
-        loss_cp:          mv.centipawn_loss,
-        win_percent_loss: mv.win_percent_loss,
-        rank:             mv.rank,
-        class:            mv.class.to_string(),
-    }
+        moves,
+    }).into_response()
 }
