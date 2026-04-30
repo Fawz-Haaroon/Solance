@@ -1,21 +1,18 @@
-export type Classification =
-    | 'best'
-    | 'excellent'
-    | 'good'
-    | 'inaccuracy'
-    | 'mistake'
-    | 'blunder'
+export type Classification = 'best' | 'excellent' | 'good' | 'inaccuracy' | 'mistake' | 'blunder'
 
 export interface MoveResponse {
-    move_number: number
-    side:        'white' | 'black'
-    san:         string
-    uci:         string
-    best_uci:    string | null
-    score_cp:    number | null
-    loss_cp:     number
-    rank:        number | null
-    class:       Classification
+    move_number:      number
+    side:             'white' | 'black'
+    san:              string
+    uci:              string
+    fen_before:       string
+    best_uci:         string | null
+    score_cp:         number | null
+    loss_cp:          number
+    win_percent_loss: number
+    rank:             number | null
+    class:            Classification
+    decided:          boolean
 }
 
 export interface AnalysisResponse {
