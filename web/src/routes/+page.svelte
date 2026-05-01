@@ -21,7 +21,7 @@
     )
 
     const boardOrientation = $derived(
-        result ? (result.white === '?' ? 'white' : 'white') : 'white'
+        'white'
     )
 
     async function submit() {

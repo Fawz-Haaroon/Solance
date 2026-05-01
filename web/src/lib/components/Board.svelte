@@ -1,29 +1,34 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte'
+    import { onMount } from 'svelte'
 
-    const { fen, lastMove, orientation = 'white' }: {
+    const { fen, orientation = 'white' }: {
         fen:          string
-        lastMove:     string | null
         orientation?: 'white' | 'black'
     } = $props()
 
     let container: HTMLDivElement
-    let board: any = null
+    let board: { setPosition: (f: string, a: boolean) => void; destroy: () => void } | null = null
 
     onMount(async () => {
-        const { Chessboard, COLOR } = await import('cm-chessboard')
+        const { Chessboard, COLOR, PIECES_FILE_TYPE } = await import('cm-chessboard')
         board = new Chessboard(container, {
-            position:    fen || 'start',
+            position:   fen || 'start',
             orientation: orientation === 'white' ? COLOR.white : COLOR.black,
-            assetsUrl:   '/',
-        })
+            assetsUrl:  '/',
+            style: {
+                pieces: {
+                    type: PIECES_FILE_TYPE.svgSprite,
+                    file: 'pieces/standard.svg',
+                    tileSize: 40,
+                }
+            }
+        }) as typeof board
+
+        return () => { board?.destroy(); board = null }
     })
 
-    onDestroy(() => { board?.destroy?.(); board = null })
-
     $effect(() => {
-        if (!board || !fen) return
-        board.setPosition(fen, true)
+        board?.setPosition(fen || 'start', true)
     })
 </script>
 

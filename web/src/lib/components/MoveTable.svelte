@@ -139,6 +139,6 @@
     .col-loss { width: 3rem; text-align: right; font-size: 0.78rem; }
 
     .icon { font-size: 0.7rem; margin-right: 5px; }
-    .san  { }
+
     .rank { font-size: 0.68rem; color: rgba(255,255,255,0.25); margin-left: 4px; }
 </style>
