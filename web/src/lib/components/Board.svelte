@@ -12,13 +12,13 @@
     onMount(async () => {
         const { Chessboard, COLOR, PIECES_FILE_TYPE } = await import('cm-chessboard')
         board = new Chessboard(container, {
-            position:   fen || 'start',
+            position:    fen || 'start',
             orientation: orientation === 'white' ? COLOR.white : COLOR.black,
-            assetsUrl:  '/',
+            assetsCache: false,
             style: {
                 pieces: {
-                    type: PIECES_FILE_TYPE.svgSprite,
-                    file: 'pieces/standard.svg',
+                    type:     PIECES_FILE_TYPE.svgSprite,
+                    file:     '/pieces/standard.svg',
                     tileSize: 40,
                 }
             }
