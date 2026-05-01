@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
-use solance_analysis::{analyze_game, MoveAnalysis};
+use solance_analysis::analyze_game;
 use solance_engine::{Engine, Score, Stockfish};
 use solance_parser::GameBuilder;
 use pgn_reader::BufferedReader;
