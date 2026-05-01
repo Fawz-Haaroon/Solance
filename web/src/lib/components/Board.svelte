@@ -15,6 +15,7 @@
         board = new Chessboard(container, {
             position:    fen || 'start',
             orientation: orientation === 'white' ? COLOR.white : COLOR.black,
+            assetsUrl:   '/',
         })
     })
 
@@ -27,7 +28,7 @@
 </script>
 
 <svelte:head>
-    <link rel="stylesheet" href="/cm-chessboard.css" />
+    <link rel="stylesheet" href="/chessboard.css" />
 </svelte:head>
 
 <div bind:this={container} class="board"></div>
