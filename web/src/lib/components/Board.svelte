@@ -10,18 +10,13 @@
     let board: { setPosition: (f: string, a: boolean) => void; destroy: () => void } | null = null
 
     onMount(async () => {
-        const { Chessboard, COLOR, PIECES_FILE_TYPE } = await import('cm-chessboard')
+        const mod = await import('cm-chessboard')
+        const { Chessboard, COLOR } = mod
         board = new Chessboard(container, {
             position:    fen || 'start',
             orientation: orientation === 'white' ? COLOR.white : COLOR.black,
+            assetsUrl:   '/assets/',
             assetsCache: false,
-            style: {
-                pieces: {
-                    type:     PIECES_FILE_TYPE.svgSprite,
-                    file:     '/pieces/standard.svg',
-                    tileSize: 40,
-                }
-            }
         }) as typeof board
 
         return () => { board?.destroy(); board = null }
