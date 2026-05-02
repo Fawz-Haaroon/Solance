@@ -1,6 +1,7 @@
 <script lang="ts">
     import { analyzeGame } from '$lib/api'
     import ScoreGraph from '$lib/components/ScoreGraph.svelte'
+    import GameStats from '$lib/components/GameStats.svelte'
     import MoveTable from '$lib/components/MoveTable.svelte'
     import Board from '$lib/components/Board.svelte'
     import type { AnalysisResponse } from '$lib/types/analysis'
@@ -96,6 +97,8 @@
                     ({result.moves[result.turning_point].loss_cp}cp loss)
                 </p>
             {/if}
+
+            <GameStats moves={result.moves} />
 
             <ScoreGraph moves={result.moves} onMoveClick={selectMove} />
 
@@ -215,3 +218,16 @@
     .select-hint { font-size: 0.78rem; color: rgba(255,255,255,0.2); text-align: center; padding: 1.5rem 1rem; background: #10101e; border: 1px solid #1e1e36; border-radius: 10px; font-family: monospace; }
     .table-panel { min-width: 0; }
 </style>
+
+<svelte:window onkeydown={(e) => {
+    if (!result) return
+    if (e.key === 'ArrowRight') {
+        selectedIndex = Math.min((selectedIndex ?? -1) + 1, result.moves.length - 1)
+        e.preventDefault()
+    }
+    if (e.key === 'ArrowLeft') {
+        const next = (selectedIndex ?? 0) - 1
+        selectedIndex = next < 0 ? null : next
+        e.preventDefault()
+    }
+}} />
