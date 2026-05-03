@@ -7,6 +7,7 @@ export interface MoveResponse {
     uci:              string
     fen_before:       string
     best_uci:         string | null
+    /** White-relative centipawns. ±1500 used for forced mate positions. */
     score_cp:         number | null
     loss_cp:          number
     win_percent_loss: number
