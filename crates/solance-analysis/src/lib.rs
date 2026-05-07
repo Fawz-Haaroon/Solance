@@ -29,8 +29,8 @@ pub struct MoveAnalysis {
     pub played_uci:       String,
     pub played_san:       String,
     pub best_uci:         Option<String>,
-    pub eval_before:      Score,
-    pub eval_after:       Score,
+    pub score_before:     Score,
+    pub score_after:      Score,
     pub centipawn_loss:   i32,
     pub win_percent_loss: f64,
     pub rank:             Option<usize>,
@@ -69,28 +69,24 @@ pub fn analyze_game(
         let pre  = &evals[i];
         let post = &evals[i + 1];
 
-        let eval_before = pre.best().map(|c| c.score).unwrap_or(Score::Cp(0));
-        let eval_after  = post.best().map(|c| c.score).unwrap_or(Score::Cp(0));
-        let best_uci    = pre.best().map(|c| c.mv.clone());
-        let rank        = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
+        let score_before = pre.best().map(|c| c.score).unwrap_or(Score::Cp(0));
+        let best_uci     = pre.best().map(|c| c.mv.clone());
+        let rank         = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
 
-        let white_to_move = i % 2 == 0;
+        let post_raw    = post.best().map(|c| c.score).unwrap_or(Score::Cp(0));
+        let score_after = if i % 2 == 0 { negate(post_raw) } else { post_raw };
 
-        // decided = the side to move already has a forced mate — further moves
-        // don't affect accuracy since the game is settled.
-        let decided = (white_to_move  && matches!(eval_before, Score::Mate(n) if n > 0))
-                   || (!white_to_move && matches!(eval_before, Score::Mate(n) if n < 0));
-
-        let centipawn_loss   = cp_loss(eval_before, eval_after, white_to_move);
-        let win_percent_loss = if decided { 0.0 } else { wpl(eval_before, eval_after) };
-        let class            = classify(win_percent_loss, eval_before, eval_after, decided, white_to_move);
+        let decided          = matches!(score_before, Score::Mate(_));
+        let centipawn_loss   = display_cp_loss(score_before, score_after);
+        let win_percent_loss = if decided { 0.0 } else { wpl(score_before, score_after) };
+        let class            = classify(win_percent_loss, score_before, score_after, decided);
 
         analyses.push(MoveAnalysis {
             played_uci: mv.uci.clone(),
             played_san: mv.san.clone(),
             best_uci,
-            eval_before,
-            eval_after,
+            score_before,
+            score_after,
             centipawn_loss,
             win_percent_loss,
             rank,
@@ -114,10 +110,17 @@ pub fn analyze_game(
     GameSummary { engine_name, moves: analyses, white_accuracy, black_accuracy, turning_point }
 }
 
+fn negate(s: Score) -> Score {
+    match s {
+        Score::Cp(n)   => Score::Cp(-n),
+        Score::Mate(n) => Score::Mate(-n),
+    }
+}
+
 fn win_prob(s: Score) -> f64 {
     let cp: f64 = match s {
         Score::Cp(n)   => n as f64,
-        Score::Mate(n) => if n > 0 { 10_000.0 } else { -10_000.0 },
+        Score::Mate(n) => if n > 0 { 10000.0 } else { -10000.0 },
     };
     1.0 / (1.0 + (-0.00368208 * cp).exp())
 }
@@ -126,26 +129,22 @@ fn wpl(before: Score, after: Score) -> f64 {
     (win_prob(before) - win_prob(after)).max(0.0)
 }
 
-fn cp_loss(before: Score, after: Score, white_to_move: bool) -> i32 {
-    let sign = if white_to_move { 1i32 } else { -1i32 };
-    let b = match before {
-        Score::Cp(n)   => n * sign,
-        Score::Mate(n) => if (n > 0) == white_to_move { 3000 } else { -3000 },
-    };
-    let a = match after {
-        Score::Cp(n)   => n * sign,
-        Score::Mate(n) => if (n > 0) == white_to_move { 3000 } else { -3000 },
-    };
-    (b - a).max(0).min(1000)
+fn display_cp_loss(before: Score, after: Score) -> i32 {
+    match (before, after) {
+        (Score::Cp(b), Score::Cp(a))            => (b - a).max(0).min(1000),
+        (Score::Mate(n), Score::Cp(_)) if n > 0 => 1000,
+        (Score::Cp(_), Score::Mate(n)) if n > 0 => 0,
+        _                                        => 0,
+    }
 }
 
-fn classify(wpl: f64, before: Score, after: Score, decided: bool, white_to_move: bool) -> Classification {
+fn classify(wpl: f64, before: Score, after: Score, decided: bool) -> Classification {
     if decided { return Classification::Best; }
-    let had_mate  = white_to_move  && matches!(before, Score::Mate(n) if n > 0)
-                 || !white_to_move && matches!(before, Score::Mate(n) if n < 0);
-    let still_mate = white_to_move  && matches!(after, Score::Mate(n) if n > 0)
-                  || !white_to_move && matches!(after, Score::Mate(n) if n < 0);
-    if had_mate && !still_mate { return Classification::Blunder; }
+    if matches!(before, Score::Mate(n) if n > 0) {
+        if !matches!(after, Score::Mate(n) if n > 0) {
+            return Classification::Blunder;
+        }
+    }
     if wpl < 0.02  { return Classification::Best; }
     if wpl < 0.05  { return Classification::Excellent; }
     if wpl < 0.10  { return Classification::Good; }
@@ -154,7 +153,6 @@ fn classify(wpl: f64, before: Score, after: Score, decided: bool, white_to_move:
     Classification::Blunder
 }
 
-// Lichess win-percent accuracy formula.
 fn lichess_accuracy<'a>(moves: impl Iterator<Item = &'a MoveAnalysis>) -> f32 {
     let mut count      = 0usize;
     let total_wpl: f64 = moves.map(|a| { count += 1; a.win_percent_loss }).sum();
@@ -166,8 +164,8 @@ fn lichess_accuracy<'a>(moves: impl Iterator<Item = &'a MoveAnalysis>) -> f32 {
 
 fn find_turning_point(analyses: &[MoveAnalysis]) -> Option<usize> {
     analyses.windows(2).enumerate().find_map(|(i, w)| {
-        let before = win_prob(w[0].eval_before);
-        let after  = win_prob(w[1].eval_after);
+        let before = win_prob(w[0].score_before);
+        let after  = win_prob(w[1].score_after);
         if (before - 0.5) * (after - 0.5) < 0.0 && w[0].win_percent_loss > 0.15 {
             Some(i)
         } else {

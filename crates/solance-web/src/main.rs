@@ -56,7 +56,7 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     let engine: Box<dyn Engine> = Box::new(
-        Stockfish::launch().expect("stockfish not found — install with: sudo apt install stockfish")
+        Stockfish::launch().expect("stockfish not found")
     );
     let state = AppState { engine: Arc::new(Mutex::new(engine)) };
     let app = Router::new()
@@ -89,10 +89,6 @@ async fn handle_analyze(
     let summary = analyze_game(&game.moves, engine.as_mut(), depth);
 
     let moves = summary.moves.iter().enumerate().zip(game.moves.iter()).map(|((i, mv), annotated)| {
-        let score_cp = match mv.eval_before {
-            Score::Cp(n)   => Some(n),
-            Score::Mate(n) => Some(if n > 0 { 1500 } else { -1500 }),
-        };
         MoveResponse {
             move_number:      i / 2 + 1,
             side:             if i % 2 == 0 { "white".into() } else { "black".into() },
@@ -100,7 +96,7 @@ async fn handle_analyze(
             uci:              mv.played_uci.clone(),
             fen_before:       annotated.fen_before.clone(),
             best_uci:         mv.best_uci.clone(),
-            score_cp,
+            score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
             loss_cp:          mv.centipawn_loss,
             win_percent_loss: mv.win_percent_loss,
             rank:             mv.rank,

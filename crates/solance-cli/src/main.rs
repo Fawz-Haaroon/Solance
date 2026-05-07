@@ -133,11 +133,10 @@ fn main() {
 fn print_score_graph(moves: &[MoveAnalysis]) {
     println!("\nscore (white perspective, capped ±500cp):");
     for (i, mv) in moves.iter().enumerate() {
-        let cp = match mv.eval_before {
+        let cp = match mv.score_before {
             Score::Cp(n)   => n.clamp(-500, 500),
             Score::Mate(n) => if n > 0 { 500 } else { -500 },
         };
-        // 0..=20 bar, midpoint at 10 = equal position
         let filled  = ((cp + 500) / 50) as usize;
         let side    = if i % 2 == 0 { 'W' } else { 'B' };
         println!(
@@ -149,4 +148,3 @@ fn print_score_graph(moves: &[MoveAnalysis]) {
         );
     }
 }
-
