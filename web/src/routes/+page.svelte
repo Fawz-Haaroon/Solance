@@ -21,6 +21,10 @@
         selectedMove ? selectedMove.fen_before ?? 'start' : 'start'
     )
 
+    const boardOrientation = $derived(
+        'white'
+    )
+
     async function submit() {
         if (!pgn.trim()) return
         loading = true; error = ''; result = null; selectedIndex = null
@@ -104,7 +108,7 @@
                         <Board
                             fen={boardFen}
                             lastMove={selectedMove?.uci ?? null}
-                            orientation="white"
+                            orientation={boardOrientation}
                         />
                     </div>
                     {#if selectedMove}
@@ -120,13 +124,7 @@
                                 </div>
                                 <div class="stat">
                                     <span class="stat-label">Score</span>
-                                    <span class="stat-val">
-                                        {#if Math.abs(selectedMove.score_cp ?? 0) >= 1500}
-                                            {(selectedMove.score_cp ?? 0) > 0 ? 'M+' : 'M−'}
-                                        {:else}
-                                            {(selectedMove.score_cp ?? 0) > 0 ? '+' : ''}{selectedMove.score_cp ?? 0}
-                                        {/if}
-                                    </span>
+                                    <span class="stat-val">{selectedMove.score_cp !== null ? (selectedMove.score_cp > 0 ? '+' : '') + selectedMove.score_cp : 'M'}</span>
                                 </div>
                                 <div class="stat">
                                     <span class="stat-label">Rank</span>

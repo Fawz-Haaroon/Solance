@@ -54,6 +54,8 @@ pub fn analyze_game(
 ) -> GameSummary {
     let engine_name = engine.name().to_owned();
 
+    // Collect N+1 evaluations for N moves. Each eval is white-relative
+    // as normalized by the engine's parse_info_line.
     let mut evals = Vec::with_capacity(moves.len() + 1);
     for mv in moves {
         evals.push(engine.evaluate(depth));
@@ -73,6 +75,9 @@ pub fn analyze_game(
         let best_uci     = pre.best().map(|c| c.mv.clone());
         let rank         = pre.candidates.iter().find(|c| c.mv == mv.uci).map(|c| c.rank);
 
+        // The engine normalizes scores to the side-to-move's perspective.
+        // After white moves (i%2==0), post is from black's perspective — negate.
+        // After black moves (i%2==1), post is from white's perspective — keep.
         let post_raw    = post.best().map(|c| c.score).unwrap_or(Score::Cp(0));
         let score_after = if i % 2 == 0 { negate(post_raw) } else { post_raw };
 
