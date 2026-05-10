@@ -21,6 +21,8 @@ struct AnalyzeRequest {
 #[derive(Serialize)]
 struct AnalyzeResponse {
     event:          String,
+    eco:            Option<String>,
+    opening:        Option<String>,
     white:          String,
     black:          String,
     result:         String,
@@ -106,6 +108,8 @@ async fn handle_analyze(
     }).collect();
 
     axum::Json(AnalyzeResponse {
+        eco:            game.meta.eco.clone(),
+        opening:        game.meta.opening.clone(),
         event:          game.meta.event.unwrap_or_else(|| "?".into()),
         white:          game.meta.white.unwrap_or_else(|| "?".into()),
         black:          game.meta.black.unwrap_or_else(|| "?".into()),

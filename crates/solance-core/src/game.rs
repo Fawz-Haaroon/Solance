@@ -2,11 +2,13 @@ use crate::AnnotatedMove;
 
 #[derive(Debug, Clone, Default)]
 pub struct GameMeta {
-    pub white:  Option<String>,
-    pub black:  Option<String>,
-    pub event:  Option<String>,
-    pub date:   Option<String>,
-    pub result: Option<String>,
+    pub white:   Option<String>,
+    pub black:   Option<String>,
+    pub event:   Option<String>,
+    pub date:    Option<String>,
+    pub result:  Option<String>,
+    pub eco:     Option<String>,
+    pub opening: Option<String>,
 }
 
 #[derive(Debug, Clone)]

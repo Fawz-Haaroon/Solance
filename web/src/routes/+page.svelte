@@ -71,7 +71,7 @@
                     <span class="player black">{result.black}</span>
                 </div>
                 <div class="meta">
-                    <span>{result.event}</span>
+                    <span>{result.opening ?? result.eco ?? result.event}</span>
                     <span class="result-badge">{result.result}</span>
                 </div>
             </div>

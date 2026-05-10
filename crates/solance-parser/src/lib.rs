@@ -47,7 +47,9 @@ impl Visitor for GameBuilder {
             b"Black"  => self.game.meta.black  = v,
             b"Event"  => self.game.meta.event  = v,
             b"Date"   => self.game.meta.date   = v,
-            b"Result" => self.game.meta.result = v,
+            b"Result"  => self.game.meta.result  = v,
+            b"ECO"     => self.game.meta.eco     = v,
+            b"Opening" => self.game.meta.opening = v,
             _ => {}
         }
     }

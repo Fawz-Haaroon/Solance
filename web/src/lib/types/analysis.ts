@@ -21,6 +21,8 @@ export interface AnalysisResponse {
     white:          string
     black:          string
     result:         string
+    eco:            string | null
+    opening:        string | null
     engine:         string
     depth:          number
     white_accuracy: number
