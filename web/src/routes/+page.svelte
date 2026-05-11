@@ -106,6 +106,11 @@
                 <div class="left-panel">
                     <div class="board-container">
                         <Board
+                        lastMove={selectedMove?.uci ?? null}
+                        hasPrev={selectedIndex !== null && selectedIndex > 0}
+                        hasNext={selectedIndex === null ? result.moves.length > 0 : selectedIndex < result.moves.length - 1}
+                        onPrev={() => { if (selectedIndex !== null && selectedIndex > 0) selectedIndex-- }}
+                        onNext={() => { selectedIndex = selectedIndex === null ? 0 : Math.min(selectedIndex + 1, result.moves.length - 1) }}
                             fen={boardFen}
                             lastMove={selectedMove?.uci ?? null}
                             orientation={boardOrientation}
