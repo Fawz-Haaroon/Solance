@@ -7,7 +7,6 @@ export interface MoveResponse {
     uci:              string
     fen_before:       string
     best_uci:         string | null
-    /** White-relative centipawns. ±1500 used for forced mate positions. */
     score_cp:         number | null
     loss_cp:          number
     win_percent_loss: number
@@ -16,7 +15,7 @@ export interface MoveResponse {
     decided:          boolean
 }
 
-export interface AnalysisResponse {
+export interface GameResponse {
     event:          string
     white:          string
     black:          string
@@ -29,6 +28,10 @@ export interface AnalysisResponse {
     black_accuracy: number
     turning_point:  number | null
     moves:          MoveResponse[]
+}
+
+export interface AnalyzeResponse {
+    games: GameResponse[]
 }
 
 export interface AnalyzeRequest {

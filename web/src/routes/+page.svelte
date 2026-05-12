@@ -1,35 +1,27 @@
 <script lang="ts">
     import { analyzeGame } from '$lib/api'
     import ScoreGraph from '$lib/components/ScoreGraph.svelte'
-    import GameStats from '$lib/components/GameStats.svelte'
     import MoveTable from '$lib/components/MoveTable.svelte'
     import Board from '$lib/components/Board.svelte'
-    import type { AnalysisResponse } from '$lib/types/analysis'
+    import GameStats from '$lib/components/GameStats.svelte'
+    import type { AnalyzeResponse, GameResponse } from '$lib/types/analysis'
 
     let pgn           = $state('')
     let depth         = $state(16)
     let loading       = $state(false)
     let error         = $state('')
-    let result        = $state<AnalysisResponse | null>(null)
+    let response      = $state<AnalyzeResponse | null>(null)
+    let gameIndex     = $state(0)
     let selectedIndex = $state<number | null>(null)
 
-    const selectedMove = $derived(
-        result && selectedIndex !== null ? result.moves[selectedIndex] : null
-    )
-
-    const boardFen = $derived(
-        selectedMove ? selectedMove.fen_before ?? 'start' : 'start'
-    )
-
-    const boardOrientation = $derived(
-        'white'
-    )
+    const result       = $derived(response?.games[gameIndex] ?? null)
+    const selectedMove = $derived(result && selectedIndex !== null ? result.moves[selectedIndex] : null)
 
     async function submit() {
         if (!pgn.trim()) return
-        loading = true; error = ''; result = null; selectedIndex = null
+        loading = true; error = ''; response = null; gameIndex = 0; selectedIndex = null
         try {
-            result = await analyzeGame({ pgn, depth })
+            response = await analyzeGame({ pgn, depth })
         } catch (e) {
             error = e instanceof Error ? e.message : String(e)
         } finally {
@@ -38,9 +30,17 @@
     }
 
     function selectMove(index: number) { selectedIndex = index }
+    function prevMove() { if (selectedIndex !== null && selectedIndex > 0) selectedIndex-- }
+    function nextMove() { selectedIndex = selectedIndex === null ? 0 : Math.min(selectedIndex + 1, (result?.moves.length ?? 1) - 1) }
 </script>
 
 <svelte:head><title>Solance</title></svelte:head>
+
+<svelte:window onkeydown={(e) => {
+    if (!result) return
+    if (e.key === 'ArrowRight') { nextMove(); e.preventDefault() }
+    if (e.key === 'ArrowLeft')  { prevMove(); e.preventDefault() }
+}} />
 
 <main>
     <header>
@@ -53,7 +53,8 @@
         <div class="controls">
             <label>
                 <span>Depth</span>
-                <input type="number" bind:value={depth} min={6} max={24} disabled={loading} />
+                <input type="range" bind:value={depth} min={6} max={24} step={2} disabled={loading} />
+                <span class="depth-val">{depth}</span>
             </label>
             <button onclick={submit} disabled={loading || !pgn.trim()}>
                 {loading ? 'Analysing…' : 'Analyse'}
@@ -62,7 +63,20 @@
         {#if error}<p class="error">{error}</p>{/if}
     </section>
 
-    {#if result}
+    {#if response && result}
+        {#if response.games.length > 1}
+            <div class="game-selector">
+                {#each response.games as g, i}
+                    <button
+                        class="game-tab {i === gameIndex ? 'active' : ''}"
+                        onclick={() => { gameIndex = i; selectedIndex = null }}
+                    >
+                        {g.white} vs {g.black}
+                    </button>
+                {/each}
+            </div>
+        {/if}
+
         <section class="result">
             <div class="game-header">
                 <div class="players">
@@ -99,25 +113,19 @@
             {/if}
 
             <GameStats moves={result.moves} />
-
             <ScoreGraph moves={result.moves} onMoveClick={selectMove} />
 
             <div class="review-layout">
                 <div class="left-panel">
-                    <div class="board-container">
-                        <Board
+                    <Board
+                        fen={selectedMove?.fen_before ?? 'start'}
                         lastMove={selectedMove?.uci ?? null}
                         bestMove={selectedMove?.best_uci ?? null}
                         hasPrev={selectedIndex !== null && selectedIndex > 0}
                         hasNext={selectedIndex === null ? result.moves.length > 0 : selectedIndex < result.moves.length - 1}
-                        onPrev={() => { if (selectedIndex !== null && selectedIndex > 0) selectedIndex-- }}
-                        onNext={() => { selectedIndex = selectedIndex === null ? 0 : Math.min(selectedIndex + 1, result.moves.length - 1) }}
-                            fen={boardFen}
-                            lastMove={selectedMove?.uci ?? null}
-                        bestMove={selectedMove?.best_uci ?? null}
-                            orientation={boardOrientation}
-                        />
-                    </div>
+                        onPrev={prevMove}
+                        onNext={nextMove}
+                    />
                     {#if selectedMove}
                         <div class="move-card">
                             <div class="move-card-top">
@@ -125,23 +133,11 @@
                                 <span class="move-class {selectedMove.class}">{selectedMove.class}</span>
                             </div>
                             <div class="move-stats">
-                                <div class="stat">
-                                    <span class="stat-label">Loss</span>
-                                    <span class="stat-val">{selectedMove.loss_cp}cp</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-label">Score</span>
-                                    <span class="stat-val">{selectedMove.score_cp !== null ? (selectedMove.score_cp > 0 ? '+' : '') + selectedMove.score_cp : 'M'}</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-label">Rank</span>
-                                    <span class="stat-val">{selectedMove.rank !== null ? '#' + selectedMove.rank : '—'}</span>
-                                </div>
+                                <div class="stat"><span class="stat-label">Loss</span><span class="stat-val">{selectedMove.loss_cp}cp</span></div>
+                                <div class="stat"><span class="stat-label">Score</span><span class="stat-val">{selectedMove.score_cp !== null ? (selectedMove.score_cp > 0 ? '+' : '') + selectedMove.score_cp : 'M'}</span></div>
+                                <div class="stat"><span class="stat-label">Rank</span><span class="stat-val">{selectedMove.rank !== null ? '#' + selectedMove.rank : '—'}</span></div>
                                 {#if selectedMove.best_uci && selectedMove.rank !== 1}
-                                    <div class="stat">
-                                        <span class="stat-label">Best</span>
-                                        <span class="stat-val mono">{selectedMove.best_uci}</span>
-                                    </div>
+                                    <div class="stat"><span class="stat-label">Best</span><span class="stat-val mono">{selectedMove.best_uci}</span></div>
                                 {/if}
                             </div>
                         </div>
@@ -149,14 +145,8 @@
                         <p class="select-hint">Click any move or bar to inspect</p>
                     {/if}
                 </div>
-
                 <div class="table-panel">
-                    <MoveTable
-                        moves={result.moves}
-                        turningPoint={result.turning_point}
-                        selectedIndex={selectedIndex}
-                        onMoveClick={selectMove}
-                    />
+                    <MoveTable moves={result.moves} turningPoint={result.turning_point} selectedIndex={selectedIndex} onMoveClick={selectMove} />
                 </div>
             </div>
         </section>
@@ -176,11 +166,17 @@
     textarea:focus { border-color: #5c5cf5; }
     .controls { display: flex; align-items: center; gap: 1rem; }
     label { display: flex; align-items: center; gap: 0.5rem; color: rgba(255,255,255,0.4); font-size: 0.82rem; }
-    input[type=number] { width: 60px; background: #10101e; border: 1px solid #1e1e36; border-radius: 6px; color: #e0e0e0; padding: 0.35rem 0.6rem; font-size: 0.82rem; outline: none; }
+    input[type=range] { accent-color: #5c5cf5; width: 100px; cursor: pointer; }
+    .depth-val { font-family: monospace; color: rgba(255,255,255,0.6); font-size: 0.85rem; min-width: 2ch; }
     button { margin-left: auto; background: #5c5cf5; color: #fff; border: none; border-radius: 8px; padding: 0.55rem 1.75rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: background 0.15s, opacity 0.15s; }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     button:not(:disabled):hover { background: #4a4ae0; }
     .error { color: #e53935; font-size: 0.82rem; font-family: monospace; }
+
+    .game-selector { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .game-tab { margin-left: 0; background: #10101e; border: 1px solid #1e1e36; border-radius: 6px; color: rgba(255,255,255,0.4); padding: 0.35rem 0.75rem; font-size: 0.78rem; cursor: pointer; }
+    .game-tab.active { border-color: #5c5cf5; color: #fff; background: rgba(92,92,245,0.1); }
+    .game-tab:hover { color: #fff; }
 
     .result { display: flex; flex-direction: column; gap: 1.25rem; }
     .game-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
@@ -202,9 +198,7 @@
     .turning-note { font-size: 0.8rem; color: rgba(229,57,53,0.75); font-family: monospace; padding: 0.4rem 0.75rem; background: rgba(229,57,53,0.05); border-left: 2px solid rgba(229,57,53,0.35); border-radius: 0 4px 4px 0; }
 
     .review-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1.25rem; align-items: start; }
-
     .left-panel { display: flex; flex-direction: column; gap: 0.75rem; position: sticky; top: 1rem; }
-    .board-container { width: 100%; border-radius: 8px; overflow: hidden; border: 1px solid #1e1e36; }
 
     .move-card { background: #10101e; border: 1px solid #1e1e36; border-radius: 10px; padding: 0.9rem 1rem; }
     .move-card-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.6rem; }
@@ -221,20 +215,6 @@
     .stat-label { font-size: 0.72rem; color: rgba(255,255,255,0.3); }
     .stat-val { font-size: 0.82rem; color: #ddd; font-family: monospace; }
     .stat-val.mono { font-size: 0.75rem; }
-
     .select-hint { font-size: 0.78rem; color: rgba(255,255,255,0.2); text-align: center; padding: 1.5rem 1rem; background: #10101e; border: 1px solid #1e1e36; border-radius: 10px; font-family: monospace; }
     .table-panel { min-width: 0; }
 </style>
-
-<svelte:window onkeydown={(e) => {
-    if (!result) return
-    if (e.key === 'ArrowRight') {
-        selectedIndex = Math.min((selectedIndex ?? -1) + 1, result.moves.length - 1)
-        e.preventDefault()
-    }
-    if (e.key === 'ArrowLeft') {
-        const next = (selectedIndex ?? 0) - 1
-        selectedIndex = next < 0 ? null : next
-        e.preventDefault()
-    }
-}} />

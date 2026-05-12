@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
-use solance_analysis::analyze_game;
+use solance_analysis::{analyze_game, MoveAnalysis};
 use solance_engine::{Engine, Score, Stockfish};
 use solance_parser::GameBuilder;
 use pgn_reader::BufferedReader;
@@ -20,12 +20,17 @@ struct AnalyzeRequest {
 
 #[derive(Serialize)]
 struct AnalyzeResponse {
+    games: Vec<GameResponse>,
+}
+
+#[derive(Serialize)]
+struct GameResponse {
     event:          String,
-    eco:            Option<String>,
-    opening:        Option<String>,
     white:          String,
     black:          String,
     result:         String,
+    eco:            Option<String>,
+    opening:        Option<String>,
     engine:         String,
     depth:          u32,
     white_accuracy: f32,
@@ -76,49 +81,62 @@ async fn handle_analyze(
 ) -> impl IntoResponse {
     let depth = body.depth.unwrap_or(16).clamp(6, 24);
 
-    let game = {
-        let mut reader  = BufferedReader::new(body.pgn.as_bytes());
+    // Parse all games from the PGN, not just the first.
+    let mut games = Vec::new();
+    let mut reader = BufferedReader::new(body.pgn.as_bytes());
+    loop {
         let mut builder = GameBuilder::new();
         match reader.read_game(&mut builder) {
-            Ok(Some(Ok(g)))  => g,
-            Ok(Some(Err(e))) => return (StatusCode::UNPROCESSABLE_ENTITY, format!("pgn parse error: {e}")).into_response(),
-            _                => return (StatusCode::UNPROCESSABLE_ENTITY, "no game found in pgn".to_owned()).into_response(),
+            Ok(Some(Ok(g)))  => games.push(g),
+            Ok(Some(Err(e))) => return (StatusCode::UNPROCESSABLE_ENTITY, format!("pgn error: {e}")).into_response(),
+            Ok(None)         => break,
+            Err(e)           => return (StatusCode::UNPROCESSABLE_ENTITY, format!("io error: {e}")).into_response(),
         }
-    };
+    }
+
+    if games.is_empty() {
+        return (StatusCode::UNPROCESSABLE_ENTITY, "no games found in pgn".to_owned()).into_response();
+    }
 
     let mut engine = state.engine.lock().await;
-    engine.reset();
-    let summary = analyze_game(&game.moves, engine.as_mut(), depth);
+    let mut game_responses = Vec::with_capacity(games.len());
 
-    let moves = summary.moves.iter().enumerate().zip(game.moves.iter()).map(|((i, mv), annotated)| {
-        MoveResponse {
-            move_number:      i / 2 + 1,
-            side:             if i % 2 == 0 { "white".into() } else { "black".into() },
-            san:              mv.played_san.clone(),
-            uci:              mv.played_uci.clone(),
-            fen_before:       annotated.fen_before.clone(),
-            best_uci:         mv.best_uci.clone(),
-            score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
-            loss_cp:          mv.centipawn_loss,
-            win_percent_loss: mv.win_percent_loss,
-            rank:             mv.rank,
-            class:            mv.class.to_string(),
-            decided:          mv.decided,
-        }
-    }).collect();
+    for game in &games {
+        engine.reset();
+        let summary = analyze_game(&game.moves, engine.as_mut(), depth);
 
-    axum::Json(AnalyzeResponse {
-        eco:            game.meta.eco.clone(),
-        opening:        game.meta.opening.clone(),
-        event:          game.meta.event.unwrap_or_else(|| "?".into()),
-        white:          game.meta.white.unwrap_or_else(|| "?".into()),
-        black:          game.meta.black.unwrap_or_else(|| "?".into()),
-        result:         game.meta.result.unwrap_or_else(|| "*".into()),
-        engine:         summary.engine_name,
-        depth,
-        white_accuracy: summary.white_accuracy,
-        black_accuracy: summary.black_accuracy,
-        turning_point:  summary.turning_point,
-        moves,
-    }).into_response()
+        let moves = summary.moves.iter().enumerate().zip(game.moves.iter()).map(|((i, mv), annotated)| {
+            MoveResponse {
+                move_number:      i / 2 + 1,
+                side:             if i % 2 == 0 { "white".into() } else { "black".into() },
+                san:              mv.played_san.clone(),
+                uci:              mv.played_uci.clone(),
+                fen_before:       annotated.fen_before.clone(),
+                best_uci:         mv.best_uci.clone(),
+                score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
+                loss_cp:          mv.centipawn_loss,
+                win_percent_loss: mv.win_percent_loss,
+                rank:             mv.rank,
+                class:            mv.class.to_string(),
+                decided:          mv.decided,
+            }
+        }).collect();
+
+        game_responses.push(GameResponse {
+            event:          game.meta.event.clone().unwrap_or_else(|| "?".into()),
+            white:          game.meta.white.clone().unwrap_or_else(|| "?".into()),
+            black:          game.meta.black.clone().unwrap_or_else(|| "?".into()),
+            result:         game.meta.result.clone().unwrap_or_else(|| "*".into()),
+            eco:            game.meta.eco.clone(),
+            opening:        game.meta.opening.clone(),
+            engine:         summary.engine_name,
+            depth,
+            white_accuracy: summary.white_accuracy,
+            black_accuracy: summary.black_accuracy,
+            turning_point:  summary.turning_point,
+            moves,
+        });
+    }
+
+    axum::Json(AnalyzeResponse { games: game_responses }).into_response()
 }
