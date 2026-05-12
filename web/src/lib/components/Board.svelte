@@ -1,7 +1,8 @@
 <script lang="ts">
-    const { fen, lastMove, orientation = 'white', onPrev, onNext, hasPrev, hasNext }: {
+    const { fen, lastMove, bestMove, orientation = 'white', onPrev, onNext, hasPrev, hasNext }: {
         fen:          string
         lastMove:     string | null
+        bestMove:     string | null
         orientation?: 'white' | 'black'
         onPrev?:      () => void
         onNext?:      () => void
@@ -31,20 +32,26 @@
         return grid
     }
 
-    // Parse UCI move like "e2e4" into from/to square names
-    function moveSquares(uci: string | null): Set<string> {
-        if (!uci || uci.length < 4) return new Set()
-        return new Set([uci.slice(0, 2), uci.slice(2, 4)])
+    function uciSquares(uci: string | null): [string, string] | null {
+        if (!uci || uci.length < 4) return null
+        return [uci.slice(0, 2), uci.slice(2, 4)]
     }
 
     function squareName(r: number, c: number): string {
         return FILES[c] + RANKS[r]
     }
 
-    const grid       = $derived(parseFen(fen))
-    const rows       = $derived(orientation === 'white' ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0])
-    const cols       = $derived(orientation === 'white' ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0])
-    const highlighted = $derived(moveSquares(lastMove))
+    const grid      = $derived(parseFen(fen))
+    const rows      = $derived(orientation === 'white' ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0])
+    const cols      = $derived(orientation === 'white' ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0])
+    const lastSq    = $derived(new Set(uciSquares(lastMove) ?? []))
+    const bestSq    = $derived(new Set(uciSquares(bestMove) ?? []))
+
+    function sqClass(name: string): string {
+        if (bestSq.has(name) && bestMove !== lastMove) return 'best-hi'
+        if (lastSq.has(name)) return 'last-hi'
+        return ''
+    }
 </script>
 
 <div class="wrap">
@@ -53,10 +60,10 @@
             {#each rows as r}
                 <div class="rank-label">{RANKS[r]}</div>
                 {#each cols as c}
-                    {@const p     = grid[r][c]}
+                    {@const p    = grid[r][c]}
+                    {@const name = squareName(r, c)}
                     {@const light = (r + c) % 2 === 0}
-                    {@const hi    = highlighted.has(squareName(r, c))}
-                    <div class="sq {light ? 'lt' : 'dk'} {hi ? 'hi' : ''}">
+                    <div class="sq {light ? 'lt' : 'dk'} {sqClass(name)}">
                         {#if p}
                             <span class="pc {p === p.toUpperCase() ? 'wp' : 'bp'}">{UNICODE[p]}</span>
                         {/if}
@@ -78,8 +85,7 @@
     .wrap { display: flex; flex-direction: column; gap: 0.5rem; }
     .board { width: 100%; aspect-ratio: 1; container-type: inline-size; }
     .inner {
-        width: 100%;
-        height: 100%;
+        width: 100%; height: 100%;
         display: grid;
         grid-template-columns: 16px repeat(8, 1fr);
         grid-template-rows: repeat(8, 1fr) 16px;
@@ -88,9 +94,10 @@
     .sq { display: flex; align-items: center; justify-content: center; }
     .lt { background: #f0d9b5; }
     .dk { background: #b58863; }
-    .hi { background: rgba(255, 213, 0, 0.55) !important; }
-    .lt.hi { background: #f6f669 !important; }
-    .dk.hi { background: #baca2b !important; }
+    .lt.last-hi { background: #f6f669; }
+    .dk.last-hi { background: #baca2b; }
+    .lt.best-hi { background: #a8d8a8; }
+    .dk.best-hi { background: #5fa65f; }
     .pc { font-size: 10cqi; line-height: 1; user-select: none; display: block; }
     .wp { color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.9)) drop-shadow(0 0 1px rgba(0,0,0,0.9)); }
     .bp { color: #111; filter: drop-shadow(0 1px 0 rgba(255,255,255,0.6)); }
@@ -104,14 +111,9 @@
     .corner     { grid-column: 1; grid-row: 9; }
     .nav { display: flex; gap: 0.5rem; }
     .nav-btn {
-        flex: 1;
-        background: #1a1a2e;
-        border: 1px solid #2a2a4e;
-        border-radius: 6px;
-        color: rgba(255,255,255,0.6);
-        padding: 0.4rem;
-        font-size: 0.8rem;
-        cursor: pointer;
+        flex: 1; background: #1a1a2e; border: 1px solid #2a2a4e;
+        border-radius: 6px; color: rgba(255,255,255,0.6);
+        padding: 0.4rem; font-size: 0.8rem; cursor: pointer;
         transition: background 0.1s, color 0.1s;
     }
     .nav-btn:not(:disabled):hover { background: #2a2a4e; color: #fff; }
