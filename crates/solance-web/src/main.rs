@@ -5,17 +5,23 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
-use solance_analysis::{analyze_game, MoveAnalysis};
+use solance_analysis::analyze_game;
 use solance_engine::{Engine, Score, Stockfish};
 use solance_parser::GameBuilder;
 use pgn_reader::BufferedReader;
 
 #[derive(Deserialize)]
 struct AnalyzeRequest {
-    pgn:   String,
-    depth: Option<u32>,
+    pgn:    String,
+    depth:  Option<u32>,
     #[allow(dead_code)]
     engine: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FenRequest {
+    fen:   String,
+    depth: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -55,6 +61,25 @@ struct MoveResponse {
     decided:          bool,
 }
 
+#[derive(Serialize)]
+struct FenResponse {
+    fen:       String,
+    depth:     u32,
+    score_cp:  Option<i32>,
+    mate_in:   Option<i32>,
+    best_move: Option<String>,
+    top_moves: Vec<TopMove>,
+}
+
+#[derive(Serialize)]
+struct TopMove {
+    mv:       String,
+    score_cp: Option<i32>,
+    mate_in:  Option<i32>,
+    rank:     usize,
+    pv:       Vec<String>,
+}
+
 #[derive(Clone)]
 struct AppState {
     engine: Arc<Mutex<Box<dyn Engine>>>,
@@ -67,7 +92,8 @@ async fn main() {
     );
     let state = AppState { engine: Arc::new(Mutex::new(engine)) };
     let app = Router::new()
-        .route("/analyze", post(handle_analyze))
+        .route("/analyze",     post(handle_analyze))
+        .route("/analyze/fen", post(handle_fen))
         .layer(CorsLayer::permissive())
         .with_state(state);
     println!("solance-web listening on 0.0.0.0:4242");
@@ -81,7 +107,6 @@ async fn handle_analyze(
 ) -> impl IntoResponse {
     let depth = body.depth.unwrap_or(16).clamp(6, 24);
 
-    // Parse all games from the PGN, not just the first.
     let mut games = Vec::new();
     let mut reader = BufferedReader::new(body.pgn.as_bytes());
     loop {
@@ -139,4 +164,32 @@ async fn handle_analyze(
     }
 
     axum::Json(AnalyzeResponse { games: game_responses }).into_response()
+}
+
+async fn handle_fen(
+    State(state): State<AppState>,
+    axum::extract::Json(body): axum::extract::Json<FenRequest>,
+) -> impl IntoResponse {
+    let depth = body.depth.unwrap_or(18).clamp(6, 24);
+    let mut engine = state.engine.lock().await;
+    engine.reset();
+    engine.set_fen(&body.fen);
+    let eval = engine.evaluate(depth);
+
+    let response = FenResponse {
+        fen:       body.fen,
+        depth,
+        score_cp:  eval.best().and_then(|c| c.score.centipawns()),
+        mate_in:   eval.best().and_then(|c| match c.score { Score::Mate(n) => Some(n), _ => None }),
+        best_move: eval.best().map(|c| c.mv.clone()),
+        top_moves: eval.candidates.iter().map(|c| TopMove {
+            mv:       c.mv.clone(),
+            score_cp: c.score.centipawns(),
+            mate_in:  match c.score { Score::Mate(n) => Some(n), _ => None },
+            rank:     c.rank,
+            pv:       c.pv.clone(),
+        }).collect(),
+    };
+
+    axum::Json(response).into_response()
 }
