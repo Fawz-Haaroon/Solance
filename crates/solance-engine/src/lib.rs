@@ -57,18 +57,21 @@ impl std::error::Error for EngineError {}
 pub trait Engine: Send {
     fn name(&self) -> &str;
     fn reset(&mut self);
+    fn set_fen(&mut self, fen: &str);
     fn apply_move(&mut self, uci: &str) -> Result<(), EngineError>;
     fn evaluate(&mut self, depth: u32) -> Evaluation;
     fn current_key(&self) -> ZobristKey;
 }
 
 pub struct Stockfish {
-    _child:      Child,
-    stdin:       ChildStdin,
-    stdout:      BufReader<ChildStdout>,
-    position:    Chess,
-    current_key: ZobristKey,
-    move_stack:  Vec<String>,
+    _child:       Child,
+    stdin:        ChildStdin,
+    stdout:       BufReader<ChildStdout>,
+    position:     Chess,
+    current_key:  ZobristKey,
+    move_stack:   Vec<String>,
+    // When set, position commands use "position fen <X>" instead of startpos.
+    fen_override: Option<String>,
 }
 
 impl Stockfish {
@@ -94,7 +97,8 @@ impl Stockfish {
             stdout: BufReader::new(stdout),
             position,
             current_key,
-            move_stack: Vec::new(),
+            move_stack:   Vec::new(),
+            fen_override: None,
         };
 
         sf.send("uci");
@@ -110,29 +114,23 @@ impl Stockfish {
         writeln!(self.stdin, "{cmd}").unwrap();
     }
 
-    // Drain any pending output then wait for readyok.
-    // This guarantees the previous search is fully consumed before we start a new one.
-    fn sync(&mut self) {
-        self.send("isready");
-        self.await_token("readyok");
-    }
-
     fn await_token(&mut self, token: &str) {
         let mut line = String::new();
         loop {
             line.clear();
             self.stdout.read_line(&mut line).unwrap();
-            if line.contains(token) {
-                break;
-            }
+            if line.contains(token) { break; }
         }
     }
 
     fn query_engine(&mut self, depth: u32) -> Evaluation {
-        // Sync first — drain any stale output from a previous search.
-        self.sync();
-
-        let pos_cmd = if self.move_stack.is_empty() {
+        let pos_cmd = if let Some(ref fen) = self.fen_override {
+            if self.move_stack.is_empty() {
+                format!("position fen {fen}")
+            } else {
+                format!("position fen {fen} moves {}", self.move_stack.join(" "))
+            }
+        } else if self.move_stack.is_empty() {
             "position startpos".to_owned()
         } else {
             format!("position startpos moves {}", self.move_stack.join(" "))
@@ -148,7 +146,6 @@ impl Stockfish {
         loop {
             line.clear();
             self.stdout.read_line(&mut line).unwrap();
-
             if line.starts_with("info") && line.contains(" pv ") {
                 if let Some(c) = parse_info_line(&line, white_to_move) {
                     if let Some(existing) = candidates.iter_mut().find(|x| x.rank == c.rank) {
@@ -158,10 +155,7 @@ impl Stockfish {
                     }
                 }
             }
-
-            if line.starts_with("bestmove") {
-                break;
-            }
+            if line.starts_with("bestmove") { break; }
         }
 
         candidates.sort_by_key(|c| c.rank);
@@ -176,9 +170,19 @@ impl Engine for Stockfish {
         self.position    = Chess::default();
         self.current_key = hash_board(self.position.board(), self.position.turn());
         self.move_stack.clear();
+        self.fen_override = None;
         self.send("ucinewgame");
         self.send("isready");
         self.await_token("readyok");
+    }
+
+    fn set_fen(&mut self, fen: &str) {
+        self.move_stack.clear();
+        self.fen_override = Some(fen.to_owned());
+        // We can't reconstruct shakmaty Chess from FEN without a parser here.
+        // Position evaluation still works — Stockfish handles the FEN directly.
+        // current_key won't be accurate for FEN positions but that's acceptable
+        // since we don't cache FEN-based evaluations across moves.
     }
 
     fn apply_move(&mut self, uci: &str) -> Result<(), EngineError> {
@@ -199,14 +203,11 @@ impl Engine for Stockfish {
         self.query_engine(depth)
     }
 
-    fn current_key(&self) -> ZobristKey {
-        self.current_key
-    }
+    fn current_key(&self) -> ZobristKey { self.current_key }
 }
 
 fn parse_info_line(line: &str, white_to_move: bool) -> Option<Candidate> {
     let parts: Vec<&str> = line.split_whitespace().collect();
-
     let mut rank:     Option<usize> = None;
     let mut score:    Option<Score> = None;
     let mut pv_start: Option<usize> = None;
@@ -234,7 +235,6 @@ fn parse_info_line(line: &str, white_to_move: bool) -> Option<Candidate> {
     let pv: Vec<String> = pv_start
         .map(|s| parts[s..].iter().map(|t| t.to_string()).collect())
         .unwrap_or_default();
-
     let mv = pv.first()?.clone();
     Some(Candidate { mv, score: score?, rank: rank?, pv })
 }
