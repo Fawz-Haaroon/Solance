@@ -4,8 +4,11 @@
     import MoveTable from '$lib/components/MoveTable.svelte'
     import Board from '$lib/components/Board.svelte'
     import GameStats from '$lib/components/GameStats.svelte'
+    import { analyzeFen } from '$lib/api'
+    import FenPanel from '$lib/components/FenPanel.svelte'
     import type { AnalyzeResponse, GameResponse } from '$lib/types/analysis'
 
+    let mode          = $state<'pgn' | 'fen'>('pgn')
     let pgn           = $state('')
     let depth         = $state(16)
     let loading       = $state(false)
@@ -43,11 +46,17 @@
 }} />
 
 <main>
+    <div class="mode-tabs">
+        <button class="tab {mode === 'pgn' ? 'active' : ''}" onclick={() => mode = 'pgn'}>Game Review</button>
+        <button class="tab {mode === 'fen' ? 'active' : ''}" onclick={() => mode = 'fen'}>Position Analysis</button>
+    </div>
+
     <header>
         <h1>Solance</h1>
         <p class="tagline">Local chess analysis. No cloud. No nonsense.</p>
     </header>
 
+    {#if mode === 'pgn'}
     <section class="input-panel">
         <textarea bind:value={pgn} placeholder="Paste PGN here…" rows={5} disabled={loading}></textarea>
         <div class="controls">
@@ -151,6 +160,9 @@
             </div>
         </section>
     {/if}
+{:else}
+    <FenPanel />
+{/if}
 </main>
 
 <style>
