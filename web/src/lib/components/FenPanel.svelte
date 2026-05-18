@@ -80,7 +80,7 @@
 <style>
     .fen-panel { display: flex; flex-direction: column; gap: 1rem; }
     .fen-input-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-    .fen-input-row input[type=text], .fen-input-row input:not([type]) {
+    .fen-input-row input {
         flex: 1;
         min-width: 200px;
         background: #10101e;

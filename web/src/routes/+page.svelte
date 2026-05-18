@@ -46,6 +46,7 @@
 }} />
 
 <main>
+    {#if loading}<div class="progress-bar"></div>{/if}
     <div class="mode-tabs">
         <button class="tab {mode === 'pgn' ? 'active' : ''}" onclick={() => mode = 'pgn'}>Game Review</button>
         <button class="tab {mode === 'fen' ? 'active' : ''}" onclick={() => mode = 'fen'}>Position Analysis</button>
@@ -229,4 +230,36 @@
     .stat-val.mono { font-size: 0.75rem; }
     .select-hint { font-size: 0.78rem; color: rgba(255,255,255,0.2); text-align: center; padding: 1.5rem 1rem; background: #10101e; border: 1px solid #1e1e36; border-radius: 10px; font-family: monospace; }
     .table-panel { min-width: 0; }
+
+    .mode-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+    .tab { margin-left: 0; background: transparent; border: 1px solid #1e1e36; border-radius: 8px; color: rgba(255,255,255,0.4); padding: 0.45rem 1.1rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+    .tab:hover { color: #fff; border-color: #3a3a5e; }
+    .tab.active { background: rgba(92,92,245,0.12); border-color: #5c5cf5; color: #fff; }
+
+    .progress-bar {
+        position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100;
+        background: linear-gradient(90deg, #5c5cf5, #8b5cf6, #5c5cf5);
+        background-size: 200% 100%;
+        animation: progress-slide 1.2s ease-in-out infinite;
+    }
+    @keyframes progress-slide {
+        0%   { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    .mode-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+    .tab { margin-left: 0; background: transparent; border: 1px solid #1e1e36; border-radius: 8px; color: rgba(255,255,255,0.4); padding: 0.45rem 1.1rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+    .tab:hover { color: #fff; border-color: #3a3a5e; }
+    .tab.active { background: rgba(92,92,245,0.12); border-color: #5c5cf5; color: #fff; }
+
+    .progress-bar {
+        position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 100;
+        background: linear-gradient(90deg, #5c5cf5, #8b5cf6, #5c5cf5);
+        background-size: 200% 100%;
+        animation: progress-slide 1.2s ease-in-out infinite;
+    }
+    @keyframes progress-slide {
+        0%   { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
 </style>
