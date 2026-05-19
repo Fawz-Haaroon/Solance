@@ -125,7 +125,12 @@
             <GameStats moves={result.moves} />
             <ScoreGraph moves={result.moves} onMoveClick={selectMove} />
 
-            <div class="review-layout">
+            <div class="review-outer">
+                <ScoreBar
+                    scoreCp={selectedMove?.score_cp ?? null}
+                    mateIn={null}
+                />
+                <div class="review-layout">
                 <div class="left-panel">
                     <Board
                         fen={selectedMove?.fen_before ?? 'start'}
@@ -158,6 +163,7 @@
                 <div class="table-panel">
                     <MoveTable moves={result.moves} turningPoint={result.turning_point} selectedIndex={selectedIndex} onMoveClick={selectMove} />
                 </div>
+            </div>
             </div>
         </section>
     {/if}
@@ -262,4 +268,7 @@
         0%   { background-position: 200% 0; }
         100% { background-position: -200% 0; }
     }
+
+    .review-outer { display: flex; gap: 0.75rem; align-items: stretch; }
+    .review-outer .review-layout { flex: 1; min-width: 0; }
 </style>
