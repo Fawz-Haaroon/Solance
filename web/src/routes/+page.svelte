@@ -154,6 +154,7 @@
                                 {#if selectedMove.best_uci && selectedMove.rank !== 1}
                                     <div class="stat"><span class="stat-label">Best</span><span class="stat-val mono">{selectedMove.best_uci}</span></div>
                                 {/if}
+                                <button class="copy-fen" onclick={() => navigator.clipboard.writeText(selectedMove?.fen_before ?? '')}>Copy FEN</button>
                             </div>
                         </div>
                     {:else}
@@ -271,4 +272,12 @@
 
     .review-outer { display: flex; gap: 0.75rem; align-items: stretch; }
     .review-outer .review-layout { flex: 1; min-width: 0; }
+    .copy-fen {
+        margin-left: 0; margin-top: 0.5rem; width: 100%;
+        background: #1a1a2e; border: 1px solid #2a2a4e;
+        border-radius: 6px; color: rgba(255,255,255,0.5);
+        padding: 0.35rem; font-size: 0.75rem; cursor: pointer;
+        transition: all 0.15s;
+    }
+    .copy-fen:hover { background: #2a2a4e; color: #fff; }
 </style>

@@ -28,6 +28,14 @@
 
     type Pair = [MoveResponse, MoveResponse | null, number, number | null]
 
+    let tableWrap: HTMLDivElement
+
+    $effect(() => {
+        if (selectedIndex === null || !tableWrap) return
+        const row = tableWrap.querySelector('[data-selected="true"]')
+        row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+
     const pairs = $derived(
         moves.reduce<Pair[]>((acc, mv, i) => {
             if (i % 2 === 0) acc.push([mv, null, i, null])
@@ -40,7 +48,7 @@
     )
 </script>
 
-<div class="table-wrap">
+<div class="table-wrap" bind:this={tableWrap}>
     <table>
         <thead>
             <tr>
@@ -53,7 +61,7 @@
         </thead>
         <tbody>
             {#each pairs as [w, b, wi, bi], i}
-                <tr class:turning={turningPoint !== null && (wi === turningPoint || bi === turningPoint)}>
+                <tr data-selected={turningPoint !== null && (wi === turningPoint || bi === turningPoint) ? undefined : (selectedIndex === wi || selectedIndex === bi) ? "true" : undefined} class:turning={turningPoint !== null && (wi === turningPoint || bi === turningPoint)}>
                     <td class="col-num">{w.move_number}</td>
 
                     <td
