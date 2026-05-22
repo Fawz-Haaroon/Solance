@@ -88,7 +88,7 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     let engine: Box<dyn Engine> = Box::new(
-        Stockfish::launch().expect("stockfish not found")
+        Stockfish::launch().expect("stockfish not found — is it installed?")
     );
     let state = AppState { engine: Arc::new(Mutex::new(engine)) };
     let app = Router::new()
@@ -105,7 +105,9 @@ async fn handle_analyze(
     State(state): State<AppState>,
     axum::extract::Json(body): axum::extract::Json<AnalyzeRequest>,
 ) -> impl IntoResponse {
-    let depth = body.depth.unwrap_or(16).clamp(6, 24);
+    // Default depth 12 — fast enough for real use, accurate enough to matter.
+    // Depth 16+ for serious analysis: user can dial it up.
+    let depth = body.depth.unwrap_or(12).clamp(6, 24);
 
     let mut games = Vec::new();
     let mut reader = BufferedReader::new(body.pgn.as_bytes());
@@ -122,6 +124,9 @@ async fn handle_analyze(
     if games.is_empty() {
         return (StatusCode::UNPROCESSABLE_ENTITY, "no games found in pgn".to_owned()).into_response();
     }
+
+    // Cap at 3 games per request to avoid indefinite blocking.
+    let games: Vec<_> = games.into_iter().take(3).collect();
 
     let mut engine = state.engine.lock().await;
     let mut game_responses = Vec::with_capacity(games.len());
