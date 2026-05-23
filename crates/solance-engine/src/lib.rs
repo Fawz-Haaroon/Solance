@@ -104,6 +104,8 @@ impl Stockfish {
         sf.send("uci");
         sf.await_token("uciok");
         sf.send("setoption name MultiPV value 5");
+        sf.send("setoption name Threads value 4");
+        sf.send("setoption name Hash value 256");
         sf.send("isready");
         sf.await_token("readyok");
 
