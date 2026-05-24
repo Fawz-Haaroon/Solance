@@ -2,17 +2,18 @@
     import { analyzeFen, type FenEvalResult } from '$lib/api'
     import Board from './Board.svelte'
 
-    let fen     = $state('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')
+    let fen     = $state('')
     let depth   = $state(18)
     let loading = $state(false)
     let error   = $state('')
     let result  = $state<FenEvalResult | null>(null)
 
     async function submit() {
-        if (!fen.trim()) return
+        const trimmed = fen.trim()
+        if (!trimmed) return
         loading = true; error = ''; result = null
         try {
-            result = await analyzeFen(fen.trim(), depth)
+            result = await analyzeFen(trimmed, depth)
         } catch(e) {
             error = e instanceof Error ? e.message : String(e)
         } finally {
@@ -31,7 +32,7 @@
     <div class="fen-input-row">
         <input
             bind:value={fen}
-            placeholder="FEN string…"
+            placeholder="Paste a FEN string and click Evaluate…"
             disabled={loading}
             onkeydown={(e) => e.key === 'Enter' && submit()}
         />
@@ -44,36 +45,37 @@
             {loading ? 'Evaluating…' : 'Evaluate'}
         </button>
     </div>
+    {#if loading}<p class="hint">Evaluating position…</p>{/if}
     {#if error}<p class="error">{error}</p>{/if}
 
     {#if result}
-        <div class="fen-result">
-            <div class="fen-layout">
-                <div class="fen-board">
-                    <Board fen={result.fen} lastMove={result.best_move} bestMove={result.best_move} />
-                </div>
-                <div class="fen-info">
-                    <div class="score-big">{formatScore(result.score_cp, result.mate_in)}</div>
-                    <p class="score-sub">depth {result.depth} · {result.score_cp !== null ? 'cp' : 'forced mate'}</p>
-                    {#if result.best_move}
-                        <div class="best-move">Best: <span>{result.best_move}</span></div>
-                    {/if}
-                    <div class="top-moves">
-                        <p class="top-label">Top moves</p>
-                        {#each result.top_moves as m}
-                            <div class="top-row">
-                                <span class="top-rank">#{m.rank}</span>
-                                <span class="top-mv">{m.mv}</span>
-                                <span class="top-score">{formatScore(m.score_cp, m.mate_in)}</span>
-                                {#if m.pv.length > 1}
-                                    <span class="top-pv">{m.pv.slice(1, 4).join(' ')}</span>
-                                {/if}
-                            </div>
-                        {/each}
-                    </div>
+        <div class="fen-layout">
+            <div class="fen-board">
+                <Board fen={result.fen} lastMove={result.best_move} bestMove={result.best_move} />
+            </div>
+            <div class="fen-info">
+                <div class="score-big">{formatScore(result.score_cp, result.mate_in)}</div>
+                <p class="score-sub">depth {result.depth} · {result.score_cp !== null ? 'cp' : 'forced mate'}</p>
+                {#if result.best_move}
+                    <div class="best-move">Best: <span>{result.best_move}</span></div>
+                {/if}
+                <div class="top-moves">
+                    <p class="top-label">Top moves</p>
+                    {#each result.top_moves as m}
+                        <div class="top-row">
+                            <span class="top-rank">#{m.rank}</span>
+                            <span class="top-mv">{m.mv}</span>
+                            <span class="top-score">{formatScore(m.score_cp, m.mate_in)}</span>
+                            {#if m.pv.length > 1}
+                                <span class="top-pv">{m.pv.slice(1, 4).join(' ')}</span>
+                            {/if}
+                        </div>
+                    {/each}
                 </div>
             </div>
         </div>
+    {:else if !loading}
+        <p class="empty-hint">Enter a FEN string above to analyse a position</p>
     {/if}
 </div>
 
@@ -81,16 +83,11 @@
     .fen-panel { display: flex; flex-direction: column; gap: 1rem; }
     .fen-input-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     .fen-input-row input {
-        flex: 1;
-        min-width: 200px;
-        background: #10101e;
-        border: 1px solid #1e1e36;
-        border-radius: 8px;
-        color: #ddd;
-        font-family: monospace;
-        font-size: 0.82rem;
-        padding: 0.55rem 0.9rem;
-        outline: none;
+        flex: 1; min-width: 200px;
+        background: #10101e; border: 1px solid #1e1e36;
+        border-radius: 8px; color: #ddd;
+        font-family: monospace; font-size: 0.82rem;
+        padding: 0.55rem 0.9rem; outline: none;
         transition: border-color 0.15s;
     }
     input:focus { border-color: #5c5cf5; }
@@ -100,7 +97,9 @@
     button { background: #5c5cf5; color: #fff; border: none; border-radius: 8px; padding: 0.55rem 1.25rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
     button:not(:disabled):hover { background: #4a4ae0; }
+    .hint  { color: rgba(255,255,255,0.4); font-size: 0.82rem; font-family: monospace; }
     .error { color: #e53935; font-size: 0.82rem; font-family: monospace; }
+    .empty-hint { color: rgba(255,255,255,0.2); font-size: 0.85rem; text-align: center; padding: 3rem; }
 
     .fen-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem; align-items: start; }
     .fen-board { width: 100%; }
@@ -109,12 +108,11 @@
     .score-sub { font-size: 0.75rem; color: rgba(255,255,255,0.3); margin-top: -0.5rem; }
     .best-move { font-size: 0.9rem; color: rgba(255,255,255,0.5); font-family: monospace; }
     .best-move span { color: #5cb85c; font-weight: 600; }
-
     .top-moves { display: flex; flex-direction: column; gap: 0.3rem; }
     .top-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.25); margin-bottom: 0.2rem; }
     .top-row { display: flex; align-items: center; gap: 0.75rem; font-family: monospace; font-size: 0.82rem; padding: 0.3rem 0.6rem; background: #10101e; border-radius: 5px; border: 1px solid #1e1e36; }
-    .top-rank { color: rgba(255,255,255,0.25); width: 2ch; }
-    .top-mv   { color: #fff; font-weight: 600; min-width: 5ch; }
+    .top-rank  { color: rgba(255,255,255,0.25); width: 2ch; }
+    .top-mv    { color: #fff; font-weight: 600; min-width: 5ch; }
     .top-score { color: #5cb85c; min-width: 6ch; }
-    .top-pv   { color: rgba(255,255,255,0.3); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .top-pv    { color: rgba(255,255,255,0.3); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

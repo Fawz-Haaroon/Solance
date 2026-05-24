@@ -25,9 +25,7 @@ struct FenRequest {
 }
 
 #[derive(Serialize)]
-struct AnalyzeResponse {
-    games: Vec<GameResponse>,
-}
+struct AnalyzeResponse { games: Vec<GameResponse> }
 
 #[derive(Serialize)]
 struct GameResponse {
@@ -88,12 +86,13 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     let engine: Box<dyn Engine> = Box::new(
-        Stockfish::launch().expect("stockfish not found — is it installed?")
+        Stockfish::launch().expect("stockfish not found")
     );
     let state = AppState { engine: Arc::new(Mutex::new(engine)) };
     let app = Router::new()
         .route("/analyze",     post(handle_analyze))
         .route("/analyze/fen", post(handle_fen))
+        .route("/health", axum::routing::get(handle_health))
         .layer(CorsLayer::permissive())
         .with_state(state);
     println!("solance-web listening on 0.0.0.0:4242");
@@ -105,9 +104,7 @@ async fn handle_analyze(
     State(state): State<AppState>,
     axum::extract::Json(body): axum::extract::Json<AnalyzeRequest>,
 ) -> impl IntoResponse {
-    // Default depth 12 — fast enough for real use, accurate enough to matter.
-    // Depth 16+ for serious analysis: user can dial it up.
-    let depth = body.depth.unwrap_or(12).clamp(6, 24);
+    let depth = body.depth.unwrap_or(12).clamp(6, 20);
 
     let mut games = Vec::new();
     let mut reader = BufferedReader::new(body.pgn.as_bytes());
@@ -125,9 +122,7 @@ async fn handle_analyze(
         return (StatusCode::UNPROCESSABLE_ENTITY, "no games found in pgn".to_owned()).into_response();
     }
 
-    // Cap at 3 games per request to avoid indefinite blocking.
     let games: Vec<_> = games.into_iter().take(3).collect();
-
     let mut engine = state.engine.lock().await;
     let mut game_responses = Vec::with_capacity(games.len());
 
@@ -135,13 +130,13 @@ async fn handle_analyze(
         engine.reset();
         let summary = analyze_game(&game.moves, engine.as_mut(), depth);
 
-        let moves = summary.moves.iter().enumerate().zip(game.moves.iter()).map(|((i, mv), annotated)| {
+        let moves = summary.moves.iter().enumerate().zip(game.moves.iter()).map(|((i, mv), ann)| {
             MoveResponse {
                 move_number:      i / 2 + 1,
                 side:             if i % 2 == 0 { "white".into() } else { "black".into() },
                 san:              mv.played_san.clone(),
                 uci:              mv.played_uci.clone(),
-                fen_before:       annotated.fen_before.clone(),
+                fen_before:       ann.fen_before.clone(),
                 best_uci:         mv.best_uci.clone(),
                 score_cp:         match mv.score_before { Score::Cp(n) => Some(n), Score::Mate(_) => None },
                 loss_cp:          mv.centipawn_loss,
@@ -181,7 +176,7 @@ async fn handle_fen(
     engine.set_fen(&body.fen);
     let eval = engine.evaluate(depth);
 
-    let response = FenResponse {
+    axum::Json(FenResponse {
         fen:       body.fen,
         depth,
         score_cp:  eval.best().and_then(|c| c.score.centipawns()),
@@ -194,7 +189,9 @@ async fn handle_fen(
             rank:     c.rank,
             pv:       c.pv.clone(),
         }).collect(),
-    };
+    }).into_response()
+}
 
-    axum::Json(response).into_response()
+async fn handle_health() -> impl IntoResponse {
+    "ok"
 }
