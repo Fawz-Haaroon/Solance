@@ -19,7 +19,6 @@
     }
 
     function barColor(cls: string, cp: number | null): string {
-        // Losing positions always dark — classification color only when white is better
         if (cp !== null && cp < 0) return '#1e1e3a'
         switch (cls) {
             case 'blunder':    return '#e53935'
@@ -30,6 +29,11 @@
             default:           return '#5cb85c'
         }
     }
+
+    // Find index of biggest blunder for annotation
+    const worstIndex = $derived(
+        moves.reduce((wi, mv, i) => mv.loss_cp > (moves[wi]?.loss_cp ?? 0) ? i : wi, 0)
+    )
 </script>
 
 <div class="graph-wrap">
@@ -41,8 +45,8 @@
         {#each moves as mv, i}
             {@const seg = whiteSegment(mv.score_cp)}
             <button
-                class="bar-col"
-                title="{mv.move_number}{mv.side === 'white' ? 'W' : 'B'} {mv.san} ({mv.loss_cp}cp loss)"
+                class="bar-col {i === worstIndex && mv.loss_cp > 100 ? 'worst' : ''}"
+                title="{mv.move_number}{mv.side === 'white' ? 'W' : 'B'} {mv.san} — {mv.class} ({mv.loss_cp}cp loss)"
                 onclick={() => onMoveClick?.(i)}
             >
                 <div
@@ -67,9 +71,14 @@
         border: 1px solid #1e1e36;
     }
     .bars { display: flex; align-items: stretch; height: 100%; gap: 1px; padding: 0 2px; }
-    .bar-col { flex: 1; position: relative; background: none; border: none; cursor: pointer; padding: 0; }
-    .bar-col:hover .bar-fill { filter: brightness(1.4); }
-    .bar-fill { position: absolute; left: 1px; right: 1px; border-radius: 1px; transition: filter 0.1s; }
+    .bar-col {
+        flex: 1; position: relative; background: none;
+        border: none; cursor: pointer; padding: 0;
+        transition: opacity 0.1s;
+    }
+    .bar-col:hover { opacity: 0.8; }
+    .bar-col.worst .bar-fill { outline: 1px solid rgba(229,57,53,0.6); }
+    .bar-fill { position: absolute; left: 1px; right: 1px; border-radius: 1px; }
     .midline { position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.12); pointer-events: none; }
     .axis-label { position: absolute; left: 5px; font-size: 9px; color: rgba(255,255,255,0.2); font-family: monospace; pointer-events: none; line-height: 1; }
     .axis-label.top { top: 4px; }
